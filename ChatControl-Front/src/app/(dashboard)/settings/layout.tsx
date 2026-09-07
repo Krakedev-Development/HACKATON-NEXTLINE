@@ -170,26 +170,39 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
                     <span className={styles.navLabel}>Asignación de Chats</span>
                   </Link>
                 </li>
+                {me?.hasCrm && (
+                  <li>
+                    <Link
+                      href="/settings/crm-integration"
+                      className={isActive('/settings/crm-integration') ? styles.navItemActive : styles.navItem}
+                    >
+                      <svg width="1.1rem" height="1.1rem" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: '0.2rem' }}>
+                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                      </svg>
+                      <span className={styles.navLabel}>Integración CRM</span>
+                    </Link>
+                  </li>
+                )}
                 <li>
-                  <Link 
-                    href="/settings/crm-integration" 
-                    className={isActive('/settings/crm-integration') ? styles.navItemActive : styles.navItem}
-                  >
-                    <svg width="1.1rem" height="1.1rem" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: '0.2rem' }}>
-                      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-                    </svg>
-                    <span className={styles.navLabel}>Integración CRM</span>
-                  </Link>
-                </li>
-                <li>
-                  <Link 
-                    href="/settings/campaigns" 
+                  <Link
+                    href="/settings/campaigns"
                     className={isActive('/settings/campaigns') ? styles.navItemActive : styles.navItem}
                   >
                     <svg width="1.1rem" height="1.1rem" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: '0.2rem' }}>
                       <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 10h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/>
                     </svg>
                     <span className={styles.navLabel}>Campañas</span>
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/settings/tags"
+                    className={isActive('/settings/tags') ? styles.navItemActive : styles.navItem}
+                  >
+                    <svg width="1.1rem" height="1.1rem" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: '0.2rem' }}>
+                      <path d="M17.63 5.84C17.27 5.33 16.67 5 16 5L5 5.01C3.9 5.01 3 5.9 3 7v10c0 1.1.9 1.99 2 1.99L16 19c.67 0 1.27-.33 1.63-.84L22 12l-4.37-6.16z"/>
+                    </svg>
+                    <span className={styles.navLabel}>Etiquetas</span>
                   </Link>
                 </li>
               </>

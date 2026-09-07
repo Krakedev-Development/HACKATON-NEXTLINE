@@ -60,7 +60,7 @@ export class ContactsController {
       phone: dto.phone,
       name: dto.name,
       email: dto.email,
-      tag: dto.tag,
+      tagId: dto.tagId,
       isSandboxAuthorized: dto.isSandboxAuthorized ?? false,
     });
     return { ok: true, contact };
@@ -71,7 +71,7 @@ export class ContactsController {
     const contact = await this.contacts.update(user.organizationId!, id, {
       name: dto.name,
       email: dto.email,
-      tag: dto.tag,
+      tagId: dto.tagId,
       isSandboxAuthorized: dto.isSandboxAuthorized,
     });
     return { ok: true, contact };

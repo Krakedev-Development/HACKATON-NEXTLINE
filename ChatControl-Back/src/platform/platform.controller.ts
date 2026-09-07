@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { OrganizationStatus, UserRole } from '@prisma/client';
-import { IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, MinLength } from 'class-validator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -26,11 +26,21 @@ class CreateOrgBodyDto {
   @IsOptional()
   @IsString()
   adminDisplayName?: string;
+
+  /** Dato administrativo del super-admin: si esta empresa tiene contratado el addon de CRM. */
+  @IsOptional()
+  @IsBoolean()
+  hasCrm?: boolean;
 }
 
 class OrgStatusBodyDto {
   @IsEnum(OrganizationStatus)
   status!: OrganizationStatus;
+}
+
+class OrgCrmBodyDto {
+  @IsBoolean()
+  hasCrm!: boolean;
 }
 
 class RenameOrgBodyDto {
@@ -73,6 +83,7 @@ export class PlatformController {
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateOrgBodyDto) {
     return this.platform.createOrganization(user.userId, {
       name: dto.name,
+      hasCrm: dto.hasCrm ?? false,
       firstAdmin:
         dto.adminEmail?.trim() && dto.adminPassword
           ? {
@@ -91,6 +102,15 @@ export class PlatformController {
     @Body() dto: OrgStatusBodyDto,
   ) {
     return this.platform.setOrganizationStatus(user.userId, id, dto.status);
+  }
+
+  @Patch(':id/crm')
+  setCrm(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: OrgCrmBodyDto,
+  ) {
+    return this.platform.setOrganizationCrm(user.userId, id, dto.hasCrm);
   }
 
   @Patch(':id/rename')

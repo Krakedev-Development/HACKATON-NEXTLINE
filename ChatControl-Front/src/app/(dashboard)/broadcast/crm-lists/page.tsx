@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   isLoggedIn,
+  getMe,
   getCrmBroadcastLists,
   deleteBroadcastList,
   type BroadcastListItem,
@@ -22,7 +23,13 @@ export default function CrmListsPage() {
       router.replace('/login');
       return;
     }
-    loadLists();
+    getMe().then((me) => {
+      if (!me.hasCrm) {
+        router.replace('/broadcast');
+        return;
+      }
+      loadLists();
+    }).catch(() => router.replace('/login'));
   }, [router]);
 
   async function loadLists() {

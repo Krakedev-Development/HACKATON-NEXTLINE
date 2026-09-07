@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatService } from '../chat/chat.service';
+import { computeAudiencePreview } from '../common/audience-preview.util';
 
 export interface BroadcastListDto {
   id: string;
@@ -192,51 +193,9 @@ export class BroadcastListsService {
       include: { contact: true },
     });
 
-    const contactIds = links.map((l) => l.contactId);
-    const uniqueContactIds = [...new Set(contactIds)];
-    const duplicates = contactIds.length - uniqueContactIds.length;
+    const contacts = links.map((l) => ({ contactId: l.contactId, phone: l.contact.phone }));
 
-    const windowMap = new Map<string, { canSend: boolean; isSandboxAuthorized: boolean }>();
-    const conversations = await this.chat.getConversationsWithWindowStatus(organizationId, userId, userRole);
-    for (const conv of conversations) {
-      windowMap.set(conv.id, {
-        canSend: conv.canSend,
-        isSandboxAuthorized: conv.isSandboxAuthorized ?? false,
-      });
-    }
-
-    const conversationIds: string[] = [];
-    let invalid = 0;
-    let blocked = 0;
-
-    for (const contactId of uniqueContactIds) {
-      const link = links.find((l) => l.contactId === contactId);
-      const phone = link?.contact.phone || '';
-      if (!phone || phone.replace(/\D/g, '').length < 7) {
-        invalid += 1;
-        continue;
-      }
-
-      let conv = await this.prisma.conversation.findFirst({ where: { contactId } });
-      if (!conv) {
-        conv = await this.prisma.conversation.create({ data: { contactId } });
-      }
-
-      const status = windowMap.get(conv.id);
-      if (status && !status.canSend && !status.isSandboxAuthorized) {
-        blocked += 1;
-      }
-      conversationIds.push(conv.id);
-    }
-
-    return {
-      total: contactIds.length,
-      unique: uniqueContactIds.length,
-      duplicates,
-      invalid,
-      blocked,
-      conversationIds,
-    };
+    return computeAudiencePreview(this.prisma, this.chat, organizationId, contacts, userId, userRole);
   }
 
   async importExcelContacts(

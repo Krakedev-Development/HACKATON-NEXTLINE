@@ -20,6 +20,7 @@ export class PlatformService {
         id: true,
         name: true,
         status: true,
+        hasCrm: true,
         whatsappPhoneNumberId: true,
         createdAt: true,
         _count: { select: { users: true, contacts: true } },
@@ -49,6 +50,7 @@ export class PlatformService {
     actorUserId: string,
     params: {
       name: string;
+      hasCrm?: boolean;
       firstAdmin?: { email: string; password: string; displayName?: string };
     },
   ) {
@@ -67,11 +69,12 @@ export class PlatformService {
     }
 
     const org = await this.prisma.organization.create({
-      data: { name },
+      data: { name, hasCrm: params.hasCrm ?? false },
       select: {
         id: true,
         name: true,
         status: true,
+        hasCrm: true,
         createdAt: true,
       },
     });
@@ -166,6 +169,24 @@ export class PlatformService {
       action: PLATFORM_AUDIT_ACTIONS.ORG_STATUS_CHANGED,
       targetOrganizationId: id,
       metadata: { previous, next: status },
+    });
+    return updated;
+  }
+
+  async setOrganizationCrm(actorUserId: string, id: string, hasCrm: boolean) {
+    const org = await this.prisma.organization.findUnique({ where: { id } });
+    if (!org) throw new NotFoundException('Empresa no encontrada');
+    const previous = org.hasCrm;
+    const updated = await this.prisma.organization.update({
+      where: { id },
+      data: { hasCrm },
+      select: { id: true, name: true, hasCrm: true },
+    });
+    await this.logAudit({
+      actorUserId,
+      action: PLATFORM_AUDIT_ACTIONS.ORG_CRM_CHANGED,
+      targetOrganizationId: id,
+      metadata: { previous, next: hasCrm },
     });
     return updated;
   }

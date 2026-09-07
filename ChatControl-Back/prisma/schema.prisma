@@ -12,6 +12,7 @@ model Organization {
   id                    String                   @id @default(cuid())
   name                  String
   status                OrganizationStatus       @default(ACTIVE)
+  hasCrm                Boolean                  @default(false)
   whatsappPhoneNumberId String?                  @unique
   createdAt             DateTime                 @default(now())
   updatedAt             DateTime                 @default(now()) @updatedAt
@@ -25,6 +26,7 @@ model Organization {
   crmContactLinks       CrmContactLink[]
   campaigns             Campaign[]
   templateHeaderMedia   TemplateHeaderMedia[]
+  tags                  Tag[]
 }
 
 /// Recuerda el último archivo de header (imagen/video) subido para cada plantilla de Meta,
@@ -209,7 +211,7 @@ model Contact {
   id                  String         @id @default(cuid())
   phone               String
   email               String?
-  tag                 String?
+  tagId               String?
   createdAt           DateTime       @default(now())
   isSandboxAuthorized Boolean        @default(false)
   name                String?
@@ -217,6 +219,7 @@ model Contact {
   campaignId          String?
   organization        Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   campaign            Campaign?      @relation(fields: [campaignId], references: [id])
+  tag                 Tag?           @relation(fields: [tagId], references: [id])
   conversations       Conversation[]
   broadcastListLinks  BroadcastListContact[]
   crmContactLinks     CrmContactLink[]
@@ -225,6 +228,7 @@ model Contact {
   @@unique([organizationId, phone])
   @@index([phone])
   @@index([campaignId])
+  @@index([tagId])
 }
 
 model Conversation {
@@ -418,5 +422,17 @@ model CampaignContact {
   @@unique([campaignId, contactId])
   @@index([campaignId])
   @@index([contactId])
+}
+
+model Tag {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contacts       Contact[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
 }
 

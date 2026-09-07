@@ -12,10 +12,12 @@ type OrganizationFormModalProps = {
   adminPassword: string;
   adminDisplayName: string;
   includeAdminOnCreate: boolean;
+  hasCrm: boolean;
   onClose: () => void;
   onSubmit: (e: FormEvent) => void;
   onNameChange: (value: string) => void;
   onIncludeAdminChange: (checked: boolean) => void;
+  onHasCrmChange: (checked: boolean) => void;
   onAdminEmailChange: (value: string) => void;
   onAdminPasswordChange: (value: string) => void;
   onAdminDisplayNameChange: (value: string) => void;
@@ -39,10 +41,12 @@ export function OrganizationFormModal({
   adminPassword,
   adminDisplayName,
   includeAdminOnCreate,
+  hasCrm,
   onClose,
   onSubmit,
   onNameChange,
   onIncludeAdminChange,
+  onHasCrmChange,
   onAdminEmailChange,
   onAdminPasswordChange,
   onAdminDisplayNameChange,
@@ -129,6 +133,27 @@ export function OrganizationFormModal({
           </label>
           <label htmlFor="checkbox-admin" className="text-sm font-bold text-[#F2F2F2] cursor-pointer font-body">
             Crear usuario admin ahora
+          </label>
+        </div>
+
+        {/* CRM toggle */}
+        <div className="flex items-center gap-3 py-1">
+          <label className="relative flex cursor-pointer items-center rounded-full p-1" htmlFor="checkbox-crm">
+            <input
+              type="checkbox"
+              className="before:content[''] peer relative h-5 w-5 cursor-pointer appearance-none rounded-md border border-[#404040]/50 bg-[#1A1A1A] transition-all checked:border-[#EF4444] checked:bg-[#EF4444] hover:before:opacity-10"
+              id="checkbox-crm"
+              checked={hasCrm}
+              onChange={(e) => onHasCrmChange(e.target.checked)}
+            />
+            <div className="pointer-events-none absolute top-2/4 left-2/4 -translate-y-2/4 -translate-x-2/4 text-white opacity-0 transition-opacity peer-checked:opacity-100">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+              </svg>
+            </div>
+          </label>
+          <label htmlFor="checkbox-crm" className="text-sm font-bold text-[#F2F2F2] cursor-pointer font-body">
+            Tiene conexión con CRM
           </label>
         </div>
 

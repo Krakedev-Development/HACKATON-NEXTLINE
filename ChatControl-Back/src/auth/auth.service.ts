@@ -148,10 +148,11 @@ export class AuthService {
     organizationId: string | null;
     organizationName: string | null;
     isSandbox: boolean;
+    hasCrm: boolean;
   }> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      include: { organization: { select: { id: true, name: true } } },
+      include: { organization: { select: { id: true, name: true, hasCrm: true } } },
     });
     if (!user) throw new UnauthorizedException();
     const isSandbox = this.config.get<string>('WHATSAPP_SANDBOX', 'true') === 'true';
@@ -163,6 +164,7 @@ export class AuthService {
       organizationId: user.organizationId,
       organizationName: user.organization?.name ?? null,
       isSandbox,
+      hasCrm: user.organization?.hasCrm ?? false,
     };
   }
 }

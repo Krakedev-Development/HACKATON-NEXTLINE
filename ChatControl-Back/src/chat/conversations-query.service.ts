@@ -21,7 +21,7 @@ export class ConversationsQueryService {
     const list = await this.prisma.conversation.findMany({
       where,
       include: {
-        contact: true,
+        contact: { include: { tag: true } },
         messages: {
           orderBy: { whatsappTimestamp: 'desc' },
           take: 1,
@@ -38,7 +38,8 @@ export class ConversationsQueryService {
         phone: c.contact.phone,
         name: c.contact.name ?? undefined,
         email: c.contact.email ?? undefined,
-        tag: c.contact.tag ?? undefined,
+        tag: c.contact.tag?.name ?? undefined,
+        tagId: c.contact.tagId ?? undefined,
         contactId: c.contact.id,
         isSandboxAuthorized: c.contact.isSandboxAuthorized,
         lastUserMessageAt: c.lastUserMessageAt?.getTime() ?? null,
@@ -61,7 +62,7 @@ export class ConversationsQueryService {
     const c = await this.prisma.conversation.findFirst({
       where: { id: conversationId, contact: { organizationId } },
       include: {
-        contact: true,
+        contact: { include: { tag: true } },
         messages: {
           orderBy: { whatsappTimestamp: 'desc' },
           take: 1,
@@ -81,7 +82,8 @@ export class ConversationsQueryService {
       phone: c.contact.phone,
       name: c.contact.name ?? undefined,
       email: c.contact.email ?? undefined,
-      tag: c.contact.tag ?? undefined,
+      tag: c.contact.tag?.name ?? undefined,
+      tagId: c.contact.tagId ?? undefined,
       contactId: c.contact.id,
       isSandboxAuthorized: c.contact.isSandboxAuthorized,
       lastUserMessageAt: c.lastUserMessageAt?.getTime() ?? null,

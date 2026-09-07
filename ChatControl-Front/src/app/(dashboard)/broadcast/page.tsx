@@ -14,6 +14,8 @@ import {
   getCrmBroadcastLists,
   previewBroadcastLists,
   getCampaigns,
+  getTags,
+  previewByTags,
   importExcelContacts,
   uploadBroadcastTemplateMedia,
   getBroadcastTemplateMedia,
@@ -30,12 +32,16 @@ import {
   type SettingsData,
   type BroadcastRun,
   type BroadcastRunContact,
+  type MeResponse,
+  type Tag,
 } from '@/lib/api';
-import { formatPhoneDisplay } from '@/lib/format';
+import { formatPhoneDisplay, humanizeTemplateName } from '@/lib/format';
 import { Spinner } from '@/shared/ui/spinner';
 import { useBroadcastProgress } from '@/widgets/broadcast-progress/BroadcastProgressProvider';
 
 const PAGE_SIZE = 50;
+const TEMPLATE_PAGE_SIZE = 3;
+const TAG_PAGE_SIZE = 20;
 
 // --- Icons ---
 function PersonIcon({ style }: { style?: React.CSSProperties }) {
@@ -50,6 +56,37 @@ function SearchIcon({ style }: { style?: React.CSSProperties }) {
   return (
     <svg style={{ width: '1rem', height: '1rem', ...style }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
+    </svg>
+  );
+}
+
+function AudiencePreviewPanel({ preview }: { preview: BroadcastListPreview }) {
+  return (
+    <div style={{
+      marginTop: 10,
+      padding: '0.75rem',
+      borderRadius: 10,
+      background: 'rgba(255,255,255,0.02)',
+      border: '1px solid rgba(255,255,255,0.05)',
+      fontSize: '0.7rem',
+      color: '#8C8C8C',
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: 6,
+    }}>
+      <span>Total: <strong style={{ color: '#F2F2F2' }}>{preview.total}</strong></span>
+      <span>Únicos: <strong style={{ color: '#22c55e' }}>{preview.unique}</strong></span>
+      <span>Duplicados: <strong style={{ color: '#f59e0b' }}>{preview.duplicates}</strong></span>
+      <span>Inválidos: <strong style={{ color: '#ef4444' }}>{preview.invalid}</strong></span>
+      <span style={{ gridColumn: '1 / -1' }}>Bloqueados: <strong style={{ color: '#ef4444' }}>{preview.blocked}</strong></span>
+    </div>
+  );
+}
+
+function ChevronDownIcon({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg style={{ width: '1.2rem', height: '1.2rem', ...style }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m6 9 6 6 6-6" />
     </svg>
   );
 }
@@ -74,7 +111,7 @@ function AuditIcon({ style }: { style?: React.CSSProperties }) {
 
 function BackIcon({ style }: { style?: React.CSSProperties }) {
   return (
-    <svg style={{ width: '1rem', height: '1rem', ...style }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <svg style={{ width: '1.2rem', height: '1.2rem', ...style }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
       <path d="M19 12H5" /><path d="m12 19-7-7 7-7" />
     </svg>
   );
@@ -146,6 +183,7 @@ export default function BroadcastPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [mounted, setMounted] = useState(false);
+  const [me, setMe] = useState<MeResponse | null>(null);
   const [contacts, setContacts] = useState<BroadcastContact[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
@@ -157,8 +195,14 @@ export default function BroadcastPage() {
   const [broadcastLists, setBroadcastLists] = useState<BroadcastListItem[]>([]);
   const [selectedListIds, setSelectedListIds] = useState<Set<string>>(new Set());
   const [listPreview, setListPreview] = useState<BroadcastListPreview | null>(null);
-  const [contactSource, setContactSource] = useState<'manual' | 'segments' | 'crm_lists' | 'excel_import'>('manual');
+  const [contactSource, setContactSource] = useState<'manual' | 'crm_lists' | 'tags' | 'excel_import'>('manual');
   const [loadingList, setLoadingList] = useState(false);
+  const [tags, setTags] = useState<Tag[]>([]);
+  const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
+  const [tagPreview, setTagPreview] = useState<BroadcastListPreview | null>(null);
+  const [loadingTags, setLoadingTags] = useState(false);
+  const [tagSearch, setTagSearch] = useState('');
+  const [tagVisibleCount, setTagVisibleCount] = useState(TAG_PAGE_SIZE);
   const [excelPreviewRows, setExcelPreviewRows] = useState<Array<{ name: string; phone: string }>>([]);
   const [excelFileName, setExcelFileName] = useState('');
   const [excelParsing, setExcelParsing] = useState(false);
@@ -168,8 +212,17 @@ export default function BroadcastPage() {
   const excelFileInputRef = useRef<HTMLInputElement>(null);
   const [dailyUsage, setDailyUsage] = useState<SettingsData | null>(null);
   const [broadcastTitle, setBroadcastTitle] = useState('');
+  const [titleError, setTitleError] = useState(false);
+  const titleInputRef = useRef<HTMLInputElement>(null);
   const [text, setText] = useState('');
   const [templateId, setTemplateId] = useState('');
+  const [templateDropdownOpen, setTemplateDropdownOpen] = useState(false);
+  const [templateDropdownPos, setTemplateDropdownPos] = useState<{
+    top: number | null; bottom: number | null; left: number; width: number; maxHeight: number;
+  } | null>(null);
+  const [templateSearch, setTemplateSearch] = useState('');
+  const [templateVisibleCount, setTemplateVisibleCount] = useState(TEMPLATE_PAGE_SIZE);
+  const templateDropdownRef = useRef<HTMLDivElement>(null);
   const [templateVars, setTemplateVars] = useState<Record<string, string>>({});
   const [templateVarModes, setTemplateVarModes] = useState<Record<string, 'fixed' | 'contact_name'>>({});
   const [templateHeaderValue, setTemplateHeaderValue] = useState('');
@@ -208,6 +261,18 @@ export default function BroadcastPage() {
       setBroadcastLists(bl);
     } catch {
       setBroadcastLists([]);
+    }
+  }, []);
+
+  const loadTags = useCallback(async () => {
+    setLoadingTags(true);
+    try {
+      const t = await getTags();
+      setTags(t);
+    } catch {
+      setTags([]);
+    } finally {
+      setLoadingTags(false);
     }
   }, []);
 
@@ -250,20 +315,21 @@ export default function BroadcastPage() {
     if (!isLoggedIn()) { router.replace('/login'); return; }
     const initialSource = searchParams?.get('source');
     const initialLists = searchParams?.get('lists');
-    if (initialSource === 'crm') {
-      setContactSource('crm_lists');
-      if (initialLists) {
-        setSelectedListIds(new Set(initialLists.split(',').filter(Boolean)));
-      }
-    }
     (async () => {
       setLoading(true);
       setLoadingCampaigns(true);
       try {
-        const [tl, campaignsData] = await Promise.all([getBroadcastTemplates(), getCampaigns()]);
+        const [tl, campaignsData, meData] = await Promise.all([getBroadcastTemplates(), getCampaigns(), getMe()]);
         setTemplates(tl);
         setCampaigns(campaignsData);
-        await loadCrmLists();
+        setMe(meData);
+        if (initialSource === 'crm' && meData.hasCrm) {
+          setContactSource('crm_lists');
+          if (initialLists) {
+            setSelectedListIds(new Set(initialLists.split(',').filter(Boolean)));
+          }
+        }
+        await Promise.all([loadCrmLists(), loadTags()]);
         refreshDailyUsage();
 
         if (campaignsData.length > 0) {
@@ -273,7 +339,7 @@ export default function BroadcastPage() {
         }
       } catch (err) {} finally { setLoading(false); setLoadingCampaigns(false); }
     })();
-  }, [mounted, router, searchParams, loadCrmLists, refreshDailyUsage]);
+  }, [mounted, router, searchParams, loadCrmLists, loadTags, refreshDailyUsage]);
 
   const onlyCanSend = messageType !== 'template';
   const campaignIdsKey = Array.from(selectedCampaignIds).sort().join(',');
@@ -434,6 +500,31 @@ export default function BroadcastPage() {
     }
   }, [contactSource, selectedListIds, refreshListPreview]);
 
+  const refreshTagPreview = useCallback(async (tagIds: string[]) => {
+    if (!tagIds.length) {
+      setTagPreview(null);
+      setSelectedIds(new Set());
+      return;
+    }
+    setLoadingList(true);
+    try {
+      const preview = await previewByTags(tagIds);
+      setTagPreview(preview);
+      setSelectedIds(new Set(preview.conversationIds));
+    } catch (err) {
+      console.error('Error loading tag preview', err);
+      setTagPreview(null);
+    } finally {
+      setLoadingList(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (contactSource === 'tags' && selectedTagIds.size > 0) {
+      refreshTagPreview(Array.from(selectedTagIds));
+    }
+  }, [contactSource, selectedTagIds, refreshTagPreview]);
+
   // Limpiar selección de contactos inactivos si se cambia a un mensaje que no es plantilla
   useEffect(() => {
     if (messageType !== 'template') {
@@ -547,6 +638,13 @@ export default function BroadcastPage() {
 
   const handleSend = async () => {
     if (sending) return;
+    if (!broadcastTitle.trim()) {
+      setTitleError(true);
+      titleInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      titleInputRef.current?.focus();
+      return;
+    }
+    setTitleError(false);
     try {
       const result = await startBroadcastSend({
         conversationIds: Array.from(selectedIds),
@@ -584,6 +682,15 @@ export default function BroadcastPage() {
     });
   };
 
+  const toggleTagSelection = (tagId: string) => {
+    setSelectedTagIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(tagId)) next.delete(tagId);
+      else next.add(tagId);
+      return next;
+    });
+  };
+
   const toggleCampaign = (campaignId: string) => {
     const nextCampaigns = new Set(selectedCampaignIds);
     const nextContacts = new Set(selectedIds);
@@ -602,21 +709,18 @@ export default function BroadcastPage() {
     setSelectedIds(nextContacts);
   };
 
-  const handleSourceChange = (source: 'manual' | 'segments' | 'crm_lists' | 'excel_import') => {
+  const handleSourceChange = (source: 'manual' | 'crm_lists' | 'tags' | 'excel_import') => {
     setContactSource(source);
     setSelectedListIds(new Set());
     setListPreview(null);
+    setSelectedTagIds(new Set());
+    setTagPreview(null);
+    setTagSearch('');
     setExcelPreviewRows([]);
     setExcelFileName('');
     setExcelImportResult(null);
     setExcelError('');
-    if (source === 'segments') {
-      setSelectedIds(new Set());
-      setLoadingList(true);
-      getBroadcastContactIds({}).then(ids => setSelectedIds(new Set(ids))).catch(() => {}).finally(() => setLoadingList(false));
-    } else {
-      setSelectedIds(new Set());
-    }
+    setSelectedIds(new Set());
   };
 
   const handleDownloadExcelTemplate = async () => {
@@ -711,6 +815,105 @@ export default function BroadcastPage() {
 
   const selectedTemplate = templates.find(t => t.id === templateId);
   const templateOptions = forceMetaTemplate ? templates.filter(t => t.id.startsWith('meta_')) : templates;
+  const filteredTemplateOptions = templateOptions.filter((t) => {
+    if (!templateSearch.trim()) return true;
+    const q = templateSearch.trim().toLowerCase();
+    const { label } = humanizeTemplateName(t.name);
+    return label.toLowerCase().includes(q) || t.name.toLowerCase().includes(q);
+  });
+  const visibleTemplateOptions = filteredTemplateOptions.slice(0, templateVisibleCount);
+
+  function handleTemplateListScroll(e: React.UIEvent<HTMLDivElement>) {
+    const el = e.currentTarget;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 80) {
+      setTemplateVisibleCount(prev => Math.min(prev + TEMPLATE_PAGE_SIZE, filteredTemplateOptions.length));
+    }
+  }
+
+  const filteredTags = tags.filter((t) => !tagSearch.trim() || t.name.toLowerCase().includes(tagSearch.trim().toLowerCase()));
+  const visibleTags = filteredTags.slice(0, tagVisibleCount);
+
+  function handleTagListScroll(e: React.UIEvent<HTMLDivElement>) {
+    const el = e.currentTarget;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 80) {
+      setTagVisibleCount(prev => Math.min(prev + TAG_PAGE_SIZE, filteredTags.length));
+    }
+  }
+
+  const handleSelectTemplate = (id: string) => {
+    setTemplateId(id);
+    setTemplateVars({});
+    setTemplateVarModes({});
+    setTemplateHeaderValue('');
+    setTemplateHeaderFileName('');
+    setTemplateHeaderPreviewUrl('');
+    setTemplateHeaderUploadError('');
+    setTemplateButtonVars({});
+    setTemplateDropdownOpen(false);
+    setTemplateSearch('');
+  };
+
+  const toggleTemplateDropdown = () => {
+    if (templateDropdownOpen) {
+      setTemplateDropdownOpen(false);
+      return;
+    }
+    const rect = templateDropdownRef.current?.getBoundingClientRect();
+    if (rect) {
+      const margin = 16;
+      const spaceBelow = window.innerHeight - rect.bottom - margin;
+      const spaceAbove = rect.top - margin;
+      const openUpward = spaceBelow < 220 && spaceAbove > spaceBelow;
+      const maxHeight = Math.max(160, Math.min(340, openUpward ? spaceAbove : spaceBelow));
+      setTemplateDropdownPos({
+        top: openUpward ? null : rect.bottom + 8,
+        bottom: openUpward ? window.innerHeight - rect.top + 8 : null,
+        left: rect.left,
+        width: rect.width,
+        maxHeight,
+      });
+    }
+    setTemplateDropdownOpen(true);
+  };
+
+  useEffect(() => {
+    setTemplateVisibleCount(TEMPLATE_PAGE_SIZE);
+  }, [templateSearch, templateDropdownOpen]);
+
+  useEffect(() => {
+    setTagVisibleCount(TAG_PAGE_SIZE);
+  }, [tagSearch]);
+
+  useEffect(() => {
+    if (!templateDropdownOpen) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (templateDropdownRef.current && !templateDropdownRef.current.contains(e.target as Node)) {
+        setTemplateDropdownOpen(false);
+        setTemplateSearch('');
+      }
+    }
+    function handleScroll(e: Event) {
+      // Ignora el scroll que pasa DENTRO del propio dropdown (la lista con infinite scroll,
+      // el buscador); solo cierra si el scroll fue en la página/otro contenedor por fuera.
+      if (templateDropdownRef.current && e.target instanceof Node && templateDropdownRef.current.contains(e.target)) {
+        return;
+      }
+      setTemplateDropdownOpen(false);
+      setTemplateSearch('');
+    }
+    function handleResize() {
+      setTemplateDropdownOpen(false);
+      setTemplateSearch('');
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    window.addEventListener('scroll', handleScroll, true);
+    window.addEventListener('resize', handleResize);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('scroll', handleScroll, true);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [templateDropdownOpen]);
 
   if (!mounted) return null;
 
@@ -724,13 +927,17 @@ export default function BroadcastPage() {
       {viewMode === 'audit' ? (
         <aside className={`aside-sidebar${sidebarOpen ? ' open' : ''}`}>
           <div style={{ padding: '1.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-            <button
-              onClick={closeAudit}
-              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'none', border: 'none', color: '#8C8C8C', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em', padding: 0, marginBottom: '1rem' }}
-            >
-              <BackIcon /> Volver
-            </button>
-            <h2 style={{ fontSize: '1.3rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '-0.02em' }}>Auditoría</h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+              <h2 style={{ fontSize: '1.5rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '-0.02em' }}>Auditoría</h2>
+              <button
+                onClick={closeAudit}
+                style={{ padding: '0.4rem', background: 'rgba(239, 68, 68, 0.1)', border: 'none', borderRadius: '8px', color: '#EF4444', cursor: 'pointer', display: 'flex' }}
+                aria-label="Volver"
+                title="Volver"
+              >
+                <BackIcon />
+              </button>
+            </div>
           </div>
           <div style={{ flex: 1, overflowY: 'auto', padding: '0.75rem' }} className="custom-scrollbar">
             {loadingRuns ? (
@@ -789,8 +996,8 @@ export default function BroadcastPage() {
           <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
             {([
               ['manual', 'Contactos Manuales'],
-              ['segments', 'Segmentos'],
-              ['crm_lists', 'Listas CRM'],
+              ...(me?.hasCrm ? [['crm_lists', 'Listas CRM']] as const : []),
+              ['tags', 'Etiquetas'],
               ['excel_import', 'Importar Excel'],
             ] as const).map(([source, label]) => (
               <button
@@ -848,26 +1055,61 @@ export default function BroadcastPage() {
                   </label>
                 ))}
               </div>
-              {listPreview && (
-                <div style={{
-                  marginTop: 10,
-                  padding: '0.75rem',
-                  borderRadius: 10,
-                  background: 'rgba(255,255,255,0.02)',
-                  border: '1px solid rgba(255,255,255,0.05)',
-                  fontSize: '0.7rem',
-                  color: '#8C8C8C',
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 1fr',
-                  gap: 6,
-                }}>
-                  <span>Total: <strong style={{ color: '#F2F2F2' }}>{listPreview.total}</strong></span>
-                  <span>Únicos: <strong style={{ color: '#22c55e' }}>{listPreview.unique}</strong></span>
-                  <span>Duplicados: <strong style={{ color: '#f59e0b' }}>{listPreview.duplicates}</strong></span>
-                  <span>Inválidos: <strong style={{ color: '#ef4444' }}>{listPreview.invalid}</strong></span>
-                  <span style={{ gridColumn: '1 / -1' }}>Bloqueados: <strong style={{ color: '#ef4444' }}>{listPreview.blocked}</strong></span>
+              {listPreview && <AudiencePreviewPanel preview={listPreview} />}
+            </div>
+          ) : contactSource === 'tags' ? (
+            <div style={{ marginBottom: '0.75rem' }}>
+              <div style={{ fontSize: '0.65rem', color: '#666', fontWeight: 700, marginBottom: 8, textTransform: 'uppercase' }}>
+                Selecciona una o varias etiquetas
+              </div>
+              <div style={{ position: 'relative', marginBottom: 8 }}>
+                <SearchIcon style={{ position: 'absolute', left: '0.65rem', top: '50%', transform: 'translateY(-50%)', color: '#444', width: '0.75rem', height: '0.75rem' }} />
+                <input
+                  type="text"
+                  value={tagSearch}
+                  onChange={(e) => setTagSearch(e.target.value)}
+                  placeholder="Buscar etiqueta..."
+                  style={{ width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 8, padding: '0.5rem 0.75rem 0.5rem 2rem', color: 'white', outline: 'none', fontSize: '0.75rem', boxSizing: 'border-box' }}
+                />
+              </div>
+              {loadingTags ? (
+                <div style={{ padding: '1rem', textAlign: 'center' }}><Spinner size={20} /></div>
+              ) : (
+                <div style={{ maxHeight: 160, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }} onScroll={handleTagListScroll} className="custom-scrollbar">
+                  {filteredTags.length === 0 ? (
+                    <div style={{ padding: '1rem', textAlign: 'center', color: '#444', fontSize: '0.75rem' }}>Sin etiquetas</div>
+                  ) : visibleTags.map((t) => (
+                    <label
+                      key={t.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        padding: '0.5rem 0.75rem',
+                        borderRadius: 10,
+                        background: selectedTagIds.has(t.id) ? 'rgba(239,68,68,0.08)' : 'rgba(255,255,255,0.02)',
+                        border: `1px solid ${selectedTagIds.has(t.id) ? 'rgba(239,68,68,0.2)' : 'rgba(255,255,255,0.05)'}`,
+                        cursor: 'pointer',
+                        fontSize: '0.8rem',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedTagIds.has(t.id)}
+                        onChange={() => toggleTagSelection(t.id)}
+                      />
+                      <span style={{ flex: 1 }}>{t.name}</span>
+                      <span style={{ color: '#666', fontSize: '0.7rem' }}>({t.contactCount})</span>
+                    </label>
+                  ))}
+                  {visibleTags.length < filteredTags.length && (
+                    <div style={{ padding: '0.4rem', textAlign: 'center', color: '#444', fontSize: '0.6rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      Desplazate para ver más
+                    </div>
+                  )}
                 </div>
               )}
+              {tagPreview && <AudiencePreviewPanel preview={tagPreview} />}
             </div>
           ) : contactSource === 'excel_import' ? (
             <div style={{ marginBottom: '0.75rem' }}>
@@ -966,7 +1208,7 @@ export default function BroadcastPage() {
                 </div>
               )}
             </div>
-          ) : contactSource === 'manual' ? (
+          ) : (
             <>
               <button
                 onClick={toggleAll}
@@ -1021,10 +1263,6 @@ export default function BroadcastPage() {
                 </div>
               )}
             </>
-          ) : (
-            <div style={{ padding: '0.75rem', marginBottom: '0.75rem', borderRadius: 10, background: 'rgba(239,68,68,0.06)', color: '#EF4444', fontSize: '0.75rem', fontWeight: 700 }}>
-              {selectedIds.size} contactos del segmento (todos los contactos de la organización)
-            </div>
           )}
         </div>
 
@@ -1037,16 +1275,16 @@ export default function BroadcastPage() {
                 </svg>
               </div>
               <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#222', textTransform: 'uppercase', letterSpacing: '0.2em' }}>
-                {contactSource === 'crm_lists' ? 'Cargando Listas CRM' : contactSource === 'segments' ? 'Cargando Segmento' : 'Cargando Audiencia'}
+                {contactSource === 'crm_lists' ? 'Cargando Listas CRM' : contactSource === 'tags' ? 'Cargando Etiquetas' : 'Cargando Audiencia'}
               </span>
             </div>
           ) : contactSource === 'crm_lists' && selectedListIds.size > 0 ? (
             <div style={{ padding: '2rem', textAlign: 'center', color: '#22c55e', fontSize: '0.9rem', fontWeight: 700 }}>
               {selectedIds.size} contactos listos desde {selectedListIds.size} lista(s) CRM
             </div>
-          ) : contactSource === 'segments' ? (
+          ) : contactSource === 'tags' && selectedTagIds.size > 0 ? (
             <div style={{ padding: '2rem', textAlign: 'center', color: '#22c55e', fontSize: '0.9rem', fontWeight: 700 }}>
-              Segmento completo: {selectedIds.size} contactos
+              {selectedIds.size} contactos listos desde {selectedTagIds.size} etiqueta(s)
             </div>
           ) : contactSource === 'excel_import' ? (
             <div style={{ padding: '2rem', textAlign: 'center', color: excelImportResult ? '#22c55e' : '#555', fontSize: '0.9rem', fontWeight: 700 }}>
@@ -1166,16 +1404,20 @@ export default function BroadcastPage() {
           {/* Título del masivo (interno, no se envía a WhatsApp) */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.5rem' }}>
             <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Título del masivo (interno, solo para auditoría)
+              Título del masivo (interno, solo para auditoría) <span style={{ color: '#EF4444' }}>*</span>
             </label>
             <input
+              ref={titleInputRef}
               type="text"
               value={broadcastTitle}
-              onChange={(e) => setBroadcastTitle(e.target.value)}
+              onChange={(e) => { setBroadcastTitle(e.target.value); if (titleError) setTitleError(false); }}
               placeholder="Ej: Promo de fin de mes"
               maxLength={120}
-              style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '0.85rem 1rem', color: 'white', outline: 'none', fontSize: '0.9rem' }}
+              style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: `1px solid ${titleError ? '#EF4444' : 'rgba(255,255,255,0.08)'}`, borderRadius: '12px', padding: '0.85rem 1rem', color: 'white', outline: 'none', fontSize: '0.9rem' }}
             />
+            {titleError && (
+              <p style={{ margin: 0, fontSize: '0.72rem', color: '#EF4444', fontWeight: 600 }}>Campo obligatorio</p>
+            )}
           </div>
 
           {/* Selector de Tipo de Mensaje */}
@@ -1226,27 +1468,78 @@ export default function BroadcastPage() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                   <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Selecciona una Plantilla</label>
-                  <select 
-                    value={templateId}
-                    onChange={(e) => {
-                      setTemplateId(e.target.value);
-                      setTemplateVars({});
-                      setTemplateVarModes({});
-                      setTemplateHeaderValue('');
-                      setTemplateHeaderFileName('');
-                      setTemplateHeaderPreviewUrl('');
-                      setTemplateHeaderUploadError('');
-                      setTemplateButtonVars({});
-                    }}
-                    style={{ 
-                      width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', padding: '1.25rem', color: 'white', outline: 'none', fontSize: '1rem', appearance: 'none',
-                      backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23EF4444' stroke-width='2.5'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E")`,
-                      backgroundRepeat: 'no-repeat', backgroundPosition: 'right 1.5rem center', backgroundSize: '1.2rem'
-                    }}
-                  >
-                    <option value="" style={{ background: '#0d0d0d' }}>Seleccionar...</option>
-                    {templateOptions.map(t => <option key={t.id} value={t.id} style={{ background: '#0d0d0d' }}>{t.name}</option>)}
-                  </select>
+                  <div ref={templateDropdownRef} style={{ position: 'relative' }}>
+                    <button
+                      type="button"
+                      onClick={toggleTemplateDropdown}
+                      style={{
+                        width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', padding: '1.25rem', color: selectedTemplate ? 'white' : '#666', outline: 'none', fontSize: '1rem',
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', cursor: 'pointer', textAlign: 'left',
+                      }}
+                    >
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {selectedTemplate ? humanizeTemplateName(selectedTemplate.name).label : 'Seleccionar...'}
+                      </span>
+                      <ChevronDownIcon style={{ color: '#EF4444', flexShrink: 0, transform: templateDropdownOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+                    </button>
+
+                    {templateDropdownOpen && templateDropdownPos && (
+                      <div style={{
+                        position: 'fixed',
+                        top: templateDropdownPos.top ?? undefined,
+                        bottom: templateDropdownPos.bottom ?? undefined,
+                        left: templateDropdownPos.left,
+                        width: templateDropdownPos.width,
+                        maxHeight: templateDropdownPos.maxHeight,
+                        zIndex: 200,
+                        background: '#0d0d0d', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '16px',
+                        boxShadow: '0 20px 40px rgba(0,0,0,0.5)', overflow: 'hidden', display: 'flex', flexDirection: 'column',
+                      }}>
+                        <div style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.06)', flexShrink: 0 }}>
+                          <div style={{ position: 'relative' }}>
+                            <SearchIcon style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: '#444', width: '0.85rem', height: '0.85rem' }} />
+                            <input
+                              autoFocus
+                              type="text"
+                              value={templateSearch}
+                              onChange={(e) => setTemplateSearch(e.target.value)}
+                              placeholder="Buscar plantilla..."
+                              style={{ width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '10px', padding: '0.6rem 0.75rem 0.6rem 2.2rem', color: 'white', outline: 'none', fontSize: '0.85rem', boxSizing: 'border-box' }}
+                            />
+                          </div>
+                        </div>
+                        <div style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto' }} className="custom-scrollbar" onScroll={handleTemplateListScroll}>
+                          {filteredTemplateOptions.length === 0 ? (
+                            <div style={{ padding: '1.5rem', textAlign: 'center', color: '#444', fontSize: '0.8rem' }}>Sin resultados</div>
+                          ) : visibleTemplateOptions.map(t => {
+                            const { label, language } = humanizeTemplateName(t.name);
+                            const isSelected = t.id === templateId;
+                            return (
+                              <button
+                                key={t.id}
+                                type="button"
+                                onClick={() => handleSelectTemplate(t.id)}
+                                style={{
+                                  width: '100%', display: 'block', textAlign: 'left', padding: '0.75rem 1rem', border: 'none',
+                                  background: isSelected ? 'rgba(239,68,68,0.1)' : 'transparent', cursor: 'pointer',
+                                }}
+                              >
+                                <div style={{ fontSize: '0.85rem', fontWeight: 700, color: isSelected ? '#EF4444' : '#F2F2F2' }}>{label}</div>
+                                <div style={{ fontSize: '0.68rem', color: '#666', marginTop: '0.15rem' }}>
+                                  {language ? `${language.toUpperCase()} · ` : ''}{t.name}
+                                </div>
+                              </button>
+                            );
+                          })}
+                          {visibleTemplateOptions.length < filteredTemplateOptions.length && (
+                            <div style={{ padding: '0.6rem', textAlign: 'center', color: '#444', fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                              Desplazate para ver más
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                   {forceMetaTemplate && templateOptions.length === 0 && (
                     <p style={{ margin: 0, fontSize: '0.75rem', color: '#EF4444', fontWeight: 600 }}>
                       No hay plantillas aprobadas de Meta disponibles. Crea/aprueba una plantilla oficial antes de enviar a estos contactos nuevos.

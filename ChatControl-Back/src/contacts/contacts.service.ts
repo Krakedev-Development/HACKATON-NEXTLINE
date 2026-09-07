@@ -6,7 +6,8 @@ export interface ContactDto {
   phone: string;
   name: string | null;
   email: string | null;
-  tag: string | null;
+  tagId: string | null;
+  tagName: string | null;
   isSandboxAuthorized: boolean;
   createdAt: number;
 }
@@ -65,6 +66,7 @@ export class ContactsService {
         take: take + 1,
         cursor: cursor ? { id: cursor } : undefined,
         orderBy: { createdAt: 'desc' },
+        include: { tag: true },
       }),
       this.prisma.contact.count({ where }),
     ]);
@@ -80,7 +82,8 @@ export class ContactsService {
         phone: c.phone,
         name: c.name,
         email: c.email,
-        tag: c.tag,
+        tagId: c.tagId,
+        tagName: c.tag?.name ?? null,
         isSandboxAuthorized: c.isSandboxAuthorized,
         createdAt: c.createdAt.getTime(),
       })),
@@ -95,18 +98,25 @@ export class ContactsService {
     return rows.map((r) => r.id);
   }
 
+  private async validateTagId(organizationId: string, tagId: string | null | undefined): Promise<void> {
+    if (!tagId) return;
+    const tag = await this.prisma.tag.findFirst({ where: { id: tagId, organizationId } });
+    if (!tag) throw new BadRequestException('Etiqueta inválida');
+  }
+
   async createOrUpdate(
     organizationId: string,
     params: {
       phone: string;
       name?: string;
       email?: string;
-      tag?: string;
+      tagId?: string | null;
       isSandboxAuthorized?: boolean;
     },
   ): Promise<ContactDto> {
     const phone = normalizePhone(params.phone);
     if (!phone) throw new BadRequestException('El número no puede estar vacío');
+    await this.validateTagId(organizationId, params.tagId);
     const contact = await this.prisma.contact.upsert({
       where: {
         organizationId_phone: { organizationId, phone },
@@ -116,15 +126,16 @@ export class ContactsService {
         phone,
         name: params.name?.trim() || null,
         email: params.email?.trim() || null,
-        tag: params.tag?.trim() || null,
+        tagId: params.tagId || null,
         isSandboxAuthorized: params.isSandboxAuthorized ?? false,
       },
       update: {
         name: params.name !== undefined ? params.name?.trim() || null : undefined,
         email: params.email !== undefined ? params.email?.trim() || null : undefined,
-        tag: params.tag !== undefined ? params.tag?.trim() || null : undefined,
+        tagId: params.tagId !== undefined ? params.tagId || null : undefined,
         isSandboxAuthorized: params.isSandboxAuthorized ?? undefined,
       },
+      include: { tag: true },
     });
     const existing = await this.prisma.conversation.findFirst({
       where: { contactId: contact.id },
@@ -139,7 +150,8 @@ export class ContactsService {
       phone: contact.phone,
       name: contact.name,
       email: contact.email,
-      tag: contact.tag,
+      tagId: contact.tagId,
+      tagName: contact.tag?.name ?? null,
       isSandboxAuthorized: contact.isSandboxAuthorized,
       createdAt: contact.createdAt.getTime(),
     };
@@ -148,27 +160,30 @@ export class ContactsService {
   async update(
     organizationId: string,
     id: string,
-    params: { name?: string; email?: string; tag?: string; isSandboxAuthorized?: boolean },
+    params: { name?: string; email?: string; tagId?: string | null; isSandboxAuthorized?: boolean },
   ): Promise<ContactDto> {
     const existing = await this.prisma.contact.findFirst({
       where: { id, organizationId },
     });
     if (!existing) throw new NotFoundException('Contacto no encontrado');
+    await this.validateTagId(organizationId, params.tagId);
     const contact = await this.prisma.contact.update({
       where: { id },
       data: {
         name: params.name !== undefined ? params.name?.trim() || null : undefined,
         email: params.email !== undefined ? params.email?.trim() || null : undefined,
-        tag: params.tag !== undefined ? params.tag?.trim() || null : undefined,
+        tagId: params.tagId !== undefined ? params.tagId || null : undefined,
         isSandboxAuthorized: params.isSandboxAuthorized ?? undefined,
       },
+      include: { tag: true },
     });
     return {
       id: contact.id,
       phone: contact.phone,
       name: contact.name,
       email: contact.email,
-      tag: contact.tag,
+      tagId: contact.tagId,
+      tagName: contact.tag?.name ?? null,
       isSandboxAuthorized: contact.isSandboxAuthorized,
       createdAt: contact.createdAt.getTime(),
     };
@@ -183,6 +198,7 @@ export class ContactsService {
     }
     const contact = await this.prisma.contact.findFirst({
       where,
+      include: { tag: true },
     });
     if (!contact) return null;
     return {
@@ -190,7 +206,8 @@ export class ContactsService {
       phone: contact.phone,
       name: contact.name,
       email: contact.email,
-      tag: contact.tag,
+      tagId: contact.tagId,
+      tagName: contact.tag?.name ?? null,
       isSandboxAuthorized: contact.isSandboxAuthorized,
       createdAt: contact.createdAt.getTime(),
     };
