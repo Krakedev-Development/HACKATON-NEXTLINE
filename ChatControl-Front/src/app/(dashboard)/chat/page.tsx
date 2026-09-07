@@ -20,13 +20,16 @@ import {
   backfillAssignments,
   sendMedia,
   getOrgUsers,
+  getTags,
   type Conversation,
   type Message,
   type NewMessagePayload,
   type MessageStatusPayload,
+  type Tag,
 } from '@/lib/api';
 import { formatPhoneDisplay } from '@/lib/format';
 import { Spinner } from '@/shared/ui/spinner';
+import { TagPicker } from '@/shared/ui/molecules/tag-picker';
 import styles from './chat.module.css';
 
 const WS_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001').replace(/\/api$/, '');
@@ -147,7 +150,8 @@ export default function ChatPage() {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [editName, setEditName] = useState('');
   const [editEmail, setEditEmail] = useState('');
-  const [editTag, setEditTag] = useState('');
+  const [editTagId, setEditTagId] = useState<string | null>(null);
+  const [tags, setTags] = useState<Tag[]>([]);
   const [editSandbox, setEditSandbox] = useState(false);
   const [isSandbox, setIsSandbox] = useState(true);
   const [updatingContact, setUpdatingContact] = useState(false);
@@ -197,6 +201,7 @@ export default function ChatPage() {
         getOrgUsers({ assignable: true }).then(u => setOrgUsers(u)).catch(() => {});
       }
     }).catch(() => {});
+    getTags().then(setTags).catch(() => {});
     loadConversations();
   }, [mounted, router]);
 
@@ -500,7 +505,7 @@ export default function ChatPage() {
     if (selectedConv) {
       setEditName(selectedConv.name || '');
       setEditEmail(selectedConv.email || '');
-      setEditTag(selectedConv.tag || '');
+      setEditTagId(selectedConv.tagId ?? null);
       setEditSandbox(selectedConv.isSandboxAuthorized || false);
     }
   }, [selectedConv]);
@@ -540,7 +545,7 @@ export default function ChatPage() {
       await updateContact(selectedConv.contactId, {
         name: editName.trim() || undefined,
         email: editEmail.trim() || undefined,
-        tag: editTag.trim() || undefined,
+        tagId: editTagId,
         isSandboxAuthorized: editSandbox,
       });
       await loadConversations(false);
@@ -1087,13 +1092,7 @@ export default function ChatPage() {
               <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                 Etiqueta
               </label>
-              <input
-                type="text"
-                value={editTag}
-                onChange={(e) => setEditTag(e.target.value)}
-                placeholder="Etiqueta del contacto"
-                style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '10px', padding: '0.75rem', color: 'white', outline: 'none', fontSize: '0.9rem' }}
-              />
+              <TagPicker tags={tags} value={editTagId} onChange={setEditTagId} />
             </div>
 
             {isSandbox && (

@@ -18,6 +18,7 @@ import { LeadAssignmentModule } from './lead-assignment/lead-assignment.module';
 import { CrmIntegrationsModule } from './crm-integrations/crm-integrations.module';
 import { BroadcastListsModule } from './broadcast-lists/broadcast-lists.module';
 import { CampaignsModule } from './campaigns/campaigns.module';
+import { TagsModule } from './tags/tags.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { CampaignsModule } from './campaigns/campaigns.module';
     OrgAuditModule,
     LeadAssignmentModule,
     CampaignsModule,
+    TagsModule,
   ],
 })
 export class AppModule {}

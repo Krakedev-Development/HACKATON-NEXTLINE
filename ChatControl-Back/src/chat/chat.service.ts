@@ -42,6 +42,7 @@ export interface Conversation {
   name?: string;
   email?: string | null;
   tag?: string | null;
+  tagId?: string | null;
   contactId?: string;
   isSandboxAuthorized?: boolean;
   lastUserMessageAt: number | null;

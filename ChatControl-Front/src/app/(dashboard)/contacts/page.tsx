@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Spinner } from '@/shared/ui/spinner';
+import { TagPicker } from '@/shared/ui/molecules/tag-picker';
 import { useRouter } from 'next/navigation';
 import {
   isLoggedIn,
@@ -9,7 +10,9 @@ import {
   createContact,
   updateContact,
   getMe,
+  getTags,
   type ContactItem,
+  type Tag,
 } from '@/lib/api';
 import { formatPhoneDisplay } from '@/lib/format';
 
@@ -51,7 +54,8 @@ export default function ContactsPage() {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
-  const [tag, setTag] = useState('');
+  const [tagId, setTagId] = useState<string | null>(null);
+  const [tags, setTags] = useState<Tag[]>([]);
   const [isSandboxAuthorized, setIsSandboxAuthorized] = useState(false);
   const [isSandbox, setIsSandbox] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -97,6 +101,7 @@ export default function ContactsPage() {
     getMe().then(me => {
       if (me.isSandbox !== undefined) setIsSandbox(me.isSandbox);
     }).catch(() => {});
+    getTags().then(setTags).catch(() => {});
   }, [mounted, router]);
 
   useEffect(() => {
@@ -118,13 +123,13 @@ export default function ContactsPage() {
       setName(selectedContact.name ?? '');
       setPhone(selectedContact.phone);
       setEmail(selectedContact.email ?? '');
-      setTag(selectedContact.tag ?? '');
+      setTagId(selectedContact.tagId ?? null);
       setIsSandboxAuthorized(selectedContact.isSandboxAuthorized);
     } else {
       setName('');
       setPhone('');
       setEmail('');
-      setTag('');
+      setTagId(null);
       setIsSandboxAuthorized(false);
     }
   }, [selectedId, selectedContact]);
@@ -134,7 +139,7 @@ export default function ContactsPage() {
     setName('');
     setPhone('');
     setEmail('');
-    setTag('');
+    setTagId(null);
     setIsSandboxAuthorized(false);
     setError('');
   };
@@ -147,9 +152,9 @@ export default function ContactsPage() {
     setError('');
     try {
       if (selectedId) {
-        await updateContact(selectedId, { name: name.trim() || undefined, email: email.trim() || undefined, tag: tag.trim() || undefined, isSandboxAuthorized });
+        await updateContact(selectedId, { name: name.trim() || undefined, email: email.trim() || undefined, tagId, isSandboxAuthorized });
       } else {
-        const { contact } = await createContact({ phone: phoneNorm, name: name.trim() || undefined, email: email.trim() || undefined, tag: tag.trim() || undefined, isSandboxAuthorized });
+        const { contact } = await createContact({ phone: phoneNorm, name: name.trim() || undefined, email: email.trim() || undefined, tagId, isSandboxAuthorized });
         setSelectedId(contact.id);
       }
       await loadFirstPage(debouncedQuery);
@@ -301,13 +306,7 @@ export default function ContactsPage() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
               <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Etiqueta (Opcional)</label>
-              <input
-                type="text"
-                value={tag}
-                onChange={(e) => setTag(e.target.value)}
-                placeholder="Ej: Cliente VIP"
-                style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '1rem', color: 'white', outline: 'none', fontSize: '1rem' }}
-              />
+              <TagPicker tags={tags} value={tagId} onChange={setTagId} />
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>

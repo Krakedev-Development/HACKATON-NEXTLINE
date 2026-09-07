@@ -9,6 +9,7 @@ import {
   getTemplatesFromMeta,
   type TemplateItem,
 } from '@/lib/api';
+import { humanizeTemplateName } from '@/lib/format';
 
 // --- Icons ---
 function TemplateIcon({ style }: { style?: React.CSSProperties }) {
@@ -152,7 +153,7 @@ export default function TemplatesPage() {
                   <TemplateIcon style={{ width: '1rem', height: '1rem' }} />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <span style={{ fontWeight: 700, fontSize: '0.9rem', color: selectedId === t.id ? 'white' : '#F2F2F2', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</span>
+                  <span style={{ fontWeight: 700, fontSize: '0.9rem', color: selectedId === t.id ? 'white' : '#F2F2F2', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{humanizeTemplateName(t.name).label}</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.2rem' }}>
                     <span style={{ fontSize: '0.65rem', color: '#666', textTransform: 'uppercase', fontWeight: 800 }}>{t.language}</span>
                     <div style={{ width: '4px', height: '4px', borderRadius: '50%', background: '#333' }}></div>
@@ -192,7 +193,7 @@ export default function TemplatesPage() {
                           <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
                         </svg>
                       </button>
-                      <h1 style={{ fontSize: '2rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '-0.02em', margin: 0 }}>{selectedTemplate.name}</h1>
+                      <h1 style={{ fontSize: '2rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '-0.02em', margin: 0 }}>{humanizeTemplateName(selectedTemplate.name).label}</h1>
                     <div style={{ padding: '0.2rem 0.6rem', background: 'rgba(74, 222, 128, 0.1)', border: '1px solid rgba(74, 222, 128, 0.2)', borderRadius: '6px', color: '#4ADE80', fontSize: '0.65rem', fontWeight: 900, textTransform: 'uppercase' }}>APROBADA</div>
                   </div>
                   <p style={{ color: '#666', fontSize: '0.95rem' }}>Estructura oficial sincronizada directamente desde el Business Manager de Meta.</p>

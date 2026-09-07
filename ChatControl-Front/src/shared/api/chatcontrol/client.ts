@@ -71,6 +71,7 @@ export interface MeResponse {
   organizationId: string | null;
   organizationName: string | null;
   isSandbox?: boolean;
+  hasCrm?: boolean;
 }
 
 // Auth: email + contraseña (usuarios en BD)
@@ -116,6 +117,7 @@ export interface Conversation {
   name?: string;
   email?: string | null;
   tag?: string | null;
+  tagId?: string | null;
   contactId?: string;
   /** Solo pruebas: número autorizado en Meta (sandbox). Si false, no se puede enviar en modo sandbox. */
   isSandboxAuthorized?: boolean;
@@ -392,7 +394,8 @@ export interface ContactItem {
   phone: string;
   name: string | null;
   email?: string | null;
-  tag?: string | null;
+  tagId?: string | null;
+  tagName?: string | null;
   isSandboxAuthorized: boolean;
   createdAt: number;
 }
@@ -430,7 +433,7 @@ export async function createContact(params: {
   phone: string;
   name?: string;
   email?: string;
-  tag?: string;
+  tagId?: string | null;
   isSandboxAuthorized?: boolean;
 }): Promise<{ ok: boolean; contact: ContactItem }> {
   return api('/contacts', {
@@ -441,7 +444,7 @@ export async function createContact(params: {
 
 export async function updateContact(
   id: string,
-  params: { name?: string; email?: string; tag?: string; isSandboxAuthorized?: boolean },
+  params: { name?: string; email?: string; tagId?: string | null; isSandboxAuthorized?: boolean },
 ): Promise<{ ok: boolean; contact: ContactItem }> {
   return api(`/contacts/${id}`, {
     method: 'PATCH',
@@ -532,6 +535,7 @@ export interface PlatformOrganization {
   id: string;
   name: string;
   status: string;
+  hasCrm: boolean;
   whatsappPhoneNumberId: string | null;
   createdAt: string;
   _count: { users: number; contacts: number };
@@ -546,6 +550,7 @@ export interface CreatePlatformOrganizationBody {
   adminEmail?: string;
   adminPassword?: string;
   adminDisplayName?: string;
+  hasCrm?: boolean;
 }
 
 export async function createPlatformOrganization(
@@ -580,6 +585,16 @@ export async function setPlatformOrganizationStatus(
   return api(`/platform/organizations/${id}/status`, {
     method: 'PATCH',
     body: JSON.stringify({ status }),
+  });
+}
+
+export async function setPlatformOrganizationCrm(
+  id: string,
+  hasCrm: boolean,
+): Promise<{ id: string; name: string; hasCrm: boolean }> {
+  return api(`/platform/organizations/${id}/crm`, {
+    method: 'PATCH',
+    body: JSON.stringify({ hasCrm }),
   });
 }
 
@@ -987,6 +1002,46 @@ export async function activateCampaign(id: string): Promise<Campaign> {
 export async function deleteCampaign(id: string): Promise<void> {
   await api(`/campaigns/${id}`, {
     method: 'DELETE',
+  });
+}
+
+// Etiquetas (catálogo CRUD de tags, usado en contactos y como fuente de audiencia en Masivos)
+export interface Tag {
+  id: string;
+  organizationId: string;
+  name: string;
+  createdAt: number | string;
+  contactCount: number;
+}
+
+export async function getTags(): Promise<Tag[]> {
+  return api<Tag[]>('/tags');
+}
+
+export async function createTag(body: { name: string }): Promise<Tag> {
+  return api<Tag>('/tags', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateTag(id: string, body: { name: string }): Promise<Tag> {
+  return api<Tag>(`/tags/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteTag(id: string): Promise<void> {
+  await api(`/tags/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function previewByTags(tagIds: string[]): Promise<BroadcastListPreview> {
+  return api<BroadcastListPreview>('/tags/preview', {
+    method: 'POST',
+    body: JSON.stringify({ tagIds }),
   });
 }
 

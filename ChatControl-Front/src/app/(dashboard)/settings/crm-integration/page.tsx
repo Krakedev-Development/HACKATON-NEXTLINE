@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
+  getMe,
   getCrmCode,
   regenerateCrmCode,
   getCrmStatus,
@@ -10,6 +12,7 @@ import {
 } from '@/lib/api';
 
 export default function CrmIntegrationPage() {
+  const router = useRouter();
   const [status, setStatus] = useState<CrmIntegrationStatus | null>(null);
   const [code, setCode] = useState('');
   const [showCode, setShowCode] = useState(false);
@@ -22,6 +25,11 @@ export default function CrmIntegrationPage() {
   useEffect(() => {
     (async () => {
       try {
+        const me = await getMe();
+        if (!me.hasCrm) {
+          router.replace('/settings');
+          return;
+        }
         const [s, c] = await Promise.all([getCrmStatus(), getCrmCode()]);
         setStatus(s);
         setCode(c.codigoVinculacion);
@@ -31,7 +39,7 @@ export default function CrmIntegrationPage() {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [router]);
 
   const handleRegenerate = async () => {
     setRegenerating(true);

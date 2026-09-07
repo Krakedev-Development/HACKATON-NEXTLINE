@@ -10,6 +10,7 @@ import {
   createPlatformOrganization,
   bootstrapPlatformOrganizationFirstAdmin,
   setPlatformOrganizationStatus,
+  setPlatformOrganizationCrm,
   renamePlatformOrganization,
   getPlatformAuditLogs,
   type MeResponse,
@@ -100,6 +101,7 @@ export function OrganizationsPage() {
   const [adminPassword, setAdminPassword] = useState('');
   const [adminDisplayName, setAdminDisplayName] = useState('');
   const [includeAdminOnCreate, setIncludeAdminOnCreate] = useState(true);
+  const [hasCrmOnCreate, setHasCrmOnCreate] = useState(false);
 
   // Modal States
   const [activeOrgId, setActiveOrgId] = useState<string>('');
@@ -188,6 +190,7 @@ export function OrganizationsPage() {
     try {
       await createPlatformOrganization({
         name,
+        hasCrm: hasCrmOnCreate,
         ...(includeAdminOnCreate && adminEmail && adminPassword
           ? {
             adminEmail: adminEmail.trim(),
@@ -200,6 +203,7 @@ export function OrganizationsPage() {
       setAdminEmail('');
       setAdminPassword('');
       setAdminDisplayName('');
+      setHasCrmOnCreate(false);
       setIsCreateModalOpen(false);
       await refreshOrganizations();
     } catch (err) {
@@ -226,6 +230,13 @@ export function OrganizationsPage() {
     try {
       const next = org.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE';
       await setPlatformOrganizationStatus(org.id, next);
+      await refreshOrganizations();
+    } catch (err) {}
+  }
+
+  async function toggleCrm(org: PlatformOrganization) {
+    try {
+      await setPlatformOrganizationCrm(org.id, !org.hasCrm);
       await refreshOrganizations();
     } catch (err) {}
   }
@@ -284,21 +295,21 @@ export function OrganizationsPage() {
             </div>
 
             {/* Toolbar Unificado y Alineado */}
-            <div className="flex gap-3 mb-6 p-3 bg-white/5 border border-white/10 rounded-xl items-center">
+            <div className="flex flex-wrap gap-3 mb-6 p-3 bg-white/5 border border-white/10 rounded-xl items-center">
               {/* Buscador */}
-              <div className="relative flex-1 flex items-center">
+              <div className="relative flex-1 min-w-[200px] flex items-center">
                 <SearchIcon style={{ position: 'absolute', left: '0.85rem', color: '#666' }} />
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   placeholder="Buscar empresa por nombre..."
                   value={orgSearch}
                   onChange={(e) => setOrgSearch(e.target.value)}
                   className="w-full bg-white/5 border border-white/10 rounded-lg py-2 pl-10 pr-3 text-[#F2F2F2] outline-none text-sm placeholder:text-[#444] focus:border-[#EF4444]/50 transition-colors"
                 />
               </div>
-              
+
               {/* Filtro de Estado - Icono Integrado */}
-              <div className="relative w-[190px] flex items-center">
+              <div className="relative w-full sm:w-[190px] flex items-center">
                 <FilterIcon style={{ position: 'absolute', left: '0.85rem', color: '#666', zIndex: 10 }} />
                 <select 
                   value={orgStatusFilter}
@@ -318,9 +329,9 @@ export function OrganizationsPage() {
               </div>
 
               {/* Botón Agregar */}
-              <button 
+              <button
                 onClick={() => setIsCreateModalOpen(true)}
-                className="h-[38px] px-5 bg-gradient-to-br from-[#EF4444] to-[#B91C1C] rounded-lg text-white font-black text-[10px] uppercase tracking-wider flex items-center gap-2 hover:scale-[1.02] transition-transform shadow-lg shadow-red-900/20 flex-shrink-0"
+                className="h-[38px] px-5 bg-gradient-to-br from-[#EF4444] to-[#B91C1C] rounded-lg text-white font-black text-[10px] uppercase tracking-wider flex items-center justify-center gap-2 hover:scale-[1.02] transition-transform shadow-lg shadow-red-900/20 flex-shrink-0 w-full sm:w-auto"
               >
                 <PlusIcon />
                 Agregar Empresa
@@ -355,6 +366,7 @@ export function OrganizationsPage() {
                       <tr className="border-b border-white/10 bg-white/[0.01]">
                         <th className="p-4 text-[10px] font-black text-[#8C8C8C] uppercase tracking-[0.2em]">Empresa</th>
                         <th className="p-4 text-[10px] font-black text-[#8C8C8C] uppercase tracking-[0.2em]">Estado</th>
+                        <th className="p-4 text-[10px] font-black text-[#8C8C8C] uppercase tracking-[0.2em]">CRM</th>
                         <th className="p-4 text-[10px] font-black text-[#8C8C8C] uppercase tracking-[0.2em] text-center">Usuarios</th>
                         <th className="p-4 text-[10px] font-black text-[#8C8C8C] uppercase tracking-[0.2em] text-center">Contactos</th>
                         <th className="p-4 text-[10px] font-black text-[#8C8C8C] uppercase tracking-[0.2em]">Creación</th>
@@ -371,9 +383,24 @@ export function OrganizationsPage() {
                             <span className="text-sm font-bold text-white">{org.name}</span>
                           </td>
                           <td className="p-4">
-                            <span className={`text-[9px] font-black px-2 py-1 rounded-md uppercase tracking-wider ${org.status === 'ACTIVE' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
+                            <button
+                              type="button"
+                              onClick={() => toggleStatus(org)}
+                              title="Click para cambiar de estado"
+                              className={`text-[9px] font-black px-2 py-1 rounded-md uppercase tracking-wider cursor-pointer transition-colors ${org.status === 'ACTIVE' ? 'bg-green-500/10 text-green-500 hover:bg-green-500/20' : 'bg-red-500/10 text-red-500 hover:bg-red-500/20'}`}
+                            >
                               {org.status === 'ACTIVE' ? 'Activa' : 'Suspendida'}
-                            </span>
+                            </button>
+                          </td>
+                          <td className="p-4">
+                            <button
+                              type="button"
+                              onClick={() => toggleCrm(org)}
+                              title="Click para cambiar de estado"
+                              className={`text-[9px] font-black px-2 py-1 rounded-md uppercase tracking-wider cursor-pointer transition-colors ${org.hasCrm ? 'bg-green-500/10 text-green-500 hover:bg-green-500/20' : 'bg-red-500/10 text-red-500 hover:bg-red-500/20'}`}
+                            >
+                              {org.hasCrm ? 'Activo' : 'Inactivo'}
+                            </button>
                           </td>
                           <td className="p-4 text-center">
                             <span className="text-sm text-[#8C8C8C] font-mono">{org._count?.users || 0}</span>
@@ -396,7 +423,7 @@ export function OrganizationsPage() {
                         </tr>
                       )) : (
                         <tr>
-                          <td colSpan={6} className="p-12 text-center text-[#666] text-sm">No hay empresas que coincidan con la búsqueda.</td>
+                          <td colSpan={7} className="p-12 text-center text-[#666] text-sm">No hay empresas que coincidan con la búsqueda.</td>
                         </tr>
                       )}
                     </tbody>
@@ -404,7 +431,7 @@ export function OrganizationsPage() {
                 </div>
 
                 {/* Pagination Controls Estilizados */}
-                <div className="flex justify-between items-center mt-6 px-2">
+                <div className="flex flex-wrap justify-between items-center gap-4 mt-6 px-2">
                   <div className="flex items-center gap-3">
                     <span className="text-[10px] font-black text-[#444] uppercase tracking-widest">Ver</span>
                     <div className="relative flex items-center">
@@ -479,10 +506,12 @@ export function OrganizationsPage() {
           adminPassword={adminPassword}
           adminDisplayName={adminDisplayName}
           includeAdminOnCreate={includeAdminOnCreate}
+          hasCrm={hasCrmOnCreate}
           onClose={() => setIsCreateModalOpen(false)}
           onSubmit={handleCreate}
           onNameChange={setName}
           onIncludeAdminChange={setIncludeAdminOnCreate}
+          onHasCrmChange={setHasCrmOnCreate}
           onAdminEmailChange={setAdminEmail}
           onAdminPasswordChange={setAdminPassword}
           onAdminDisplayNameChange={setAdminDisplayName}

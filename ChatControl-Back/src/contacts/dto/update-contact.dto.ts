@@ -11,7 +11,7 @@ export class UpdateContactDto {
 
   @IsString()
   @IsOptional()
-  tag?: string;
+  tagId?: string;
 
   /** Solo pruebas: número autorizado en Meta (sandbox). TODO: eliminar en producción. */
   @IsBoolean()
