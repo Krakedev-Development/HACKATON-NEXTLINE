@@ -24,12 +24,17 @@ export class BroadcastController {
     @Query('limit') limit?: string,
     @Query('q') q?: string,
     @Query('campaignIds') campaignIds?: string,
+    @Query('tagIds') tagIds?: string,
   ) {
     return this.broadcast.getContacts(
       user.organizationId!,
       user.userId,
       user.role,
-      { q, campaignIds: campaignIds ? campaignIds.split(',').filter(Boolean) : undefined },
+      {
+        q,
+        campaignIds: campaignIds ? campaignIds.split(',').filter(Boolean) : undefined,
+        tagIds: tagIds ? tagIds.split(',').filter(Boolean) : undefined,
+      },
       cursor,
       limit ? parseInt(limit, 10) : undefined,
     );
@@ -41,11 +46,13 @@ export class BroadcastController {
     @Query('q') q?: string,
     @Query('onlyCanSend') onlyCanSend?: string,
     @Query('campaignIds') campaignIds?: string,
+    @Query('tagIds') tagIds?: string,
   ) {
     const ids = await this.broadcast.getAllContactIds(user.organizationId!, user.userId, user.role, {
       q,
       onlyCanSend: onlyCanSend === 'true',
       campaignIds: campaignIds ? campaignIds.split(',').filter(Boolean) : undefined,
+      tagIds: tagIds ? tagIds.split(',').filter(Boolean) : undefined,
     });
     return { ids };
   }

@@ -39,7 +39,7 @@ export class TagsService {
   }
 
   async create(organizationId: string, name: string): Promise<TagDto> {
-    const trimmed = name?.trim();
+    const trimmed = name?.trim().toUpperCase();
     if (!trimmed) throw new BadRequestException('El nombre de la etiqueta no puede estar vacío');
     try {
       const tag = await this.prisma.tag.create({
@@ -56,7 +56,7 @@ export class TagsService {
   }
 
   async update(organizationId: string, id: string, name: string): Promise<TagDto> {
-    const trimmed = name?.trim();
+    const trimmed = name?.trim().toUpperCase();
     if (!trimmed) throw new BadRequestException('El nombre de la etiqueta no puede estar vacío');
     const existing = await this.prisma.tag.findFirst({ where: { id, organizationId } });
     if (!existing) throw new NotFoundException('Etiqueta no encontrada');

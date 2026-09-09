@@ -12,6 +12,11 @@ export class ImportExcelContactRowDto {
   @MinLength(7)
   @MaxLength(20)
   phone!: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(100)
+  tag?: string;
 }
 
 export class ImportExcelContactsDto {

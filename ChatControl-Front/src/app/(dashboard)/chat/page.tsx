@@ -67,6 +67,109 @@ function ReplyIcon({ style }: { style?: React.CSSProperties }) {
   );
 }
 
+function PlayIcon({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg style={{ width: '0.9rem', height: '0.9rem', ...style }} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M8 5v14l11-7z" />
+    </svg>
+  );
+}
+
+function PauseIcon({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg style={{ width: '0.9rem', height: '0.9rem', ...style }} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M6 5h4v14H6zm8 0h4v14h-4z" />
+    </svg>
+  );
+}
+
+function formatAudioTime(seconds: number): string {
+  if (!isFinite(seconds) || seconds < 0) return '0:00';
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
+}
+
+/** Reproductor de audio con estilos propios: el <audio controls> nativo no se puede
+ * re-estilar de forma consistente entre navegadores, así que se reemplaza por un
+ * botón de play/pause + barra de progreso propios, acordes al tema de la app. */
+function AudioPlayer({ src, isAgent }: { src: string; isAgent: boolean }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const onTimeUpdate = () => setCurrentTime(audio.currentTime);
+    const onLoadedMetadata = () => setDuration(audio.duration || 0);
+    const onEnded = () => { setIsPlaying(false); setCurrentTime(0); };
+    audio.addEventListener('timeupdate', onTimeUpdate);
+    audio.addEventListener('loadedmetadata', onLoadedMetadata);
+    audio.addEventListener('ended', onEnded);
+    return () => {
+      audio.removeEventListener('timeupdate', onTimeUpdate);
+      audio.removeEventListener('loadedmetadata', onLoadedMetadata);
+      audio.removeEventListener('ended', onEnded);
+    };
+  }, []);
+
+  const togglePlay = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (isPlaying) {
+      audio.pause();
+    } else {
+      audio.play().catch(() => {});
+    }
+    setIsPlaying(!isPlaying);
+  };
+
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const time = Number(e.target.value);
+    audio.currentTime = time;
+    setCurrentTime(time);
+  };
+
+  const accent = isAgent ? '#FFFFFF' : '#EF4444';
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', minWidth: '240px' }}>
+      <audio ref={audioRef} src={src} preload="metadata" style={{ display: 'none' }} />
+      <button
+        type="button"
+        onClick={togglePlay}
+        style={{
+          width: '2.1rem', height: '2.1rem', borderRadius: '50%', border: 'none', flexShrink: 0,
+          background: isAgent ? 'rgba(255,255,255,0.2)' : 'rgba(239,68,68,0.15)',
+          color: isAgent ? 'white' : '#EF4444',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+        }}
+        aria-label={isPlaying ? 'Pausar' : 'Reproducir'}
+      >
+        {isPlaying ? <PauseIcon /> : <PlayIcon style={{ marginLeft: '1px' }} />}
+      </button>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+        <input
+          type="range"
+          min={0}
+          max={duration || 0}
+          step={0.1}
+          value={currentTime}
+          onChange={handleSeek}
+          style={{ width: '100%', height: '4px', cursor: 'pointer', accentColor: accent }}
+        />
+        <span style={{ fontSize: '0.65rem', color: isAgent ? 'rgba(255,255,255,0.75)' : '#888', fontWeight: 600 }}>
+          {formatAudioTime(currentTime)} / {formatAudioTime(duration)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function SendIcon({ style }: { style?: React.CSSProperties }) {
   return (
     <svg style={{ width: '1.1rem', height: '1.1rem', ...style }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -744,6 +847,11 @@ export default function ChatPage() {
                     const isAudio = m.type === 'AUDIO';
                     const isDocument = m.type === 'DOCUMENT';
                     const isSticker = isImage && m.mimeType?.toLowerCase() === 'image/webp';
+                    // WhatsApp le da a los mensajes con foto/video un ancho de "tarjeta" fijo
+                    // (el contenido se adapta a ese ancho), a diferencia del texto que se ajusta
+                    // libremente al contenido. Sin esto, un video vertical quedaba diminuto,
+                    // limitado solo por maxHeight, "como en una esquinita" de la burbuja.
+                    const isMediaCard = (isImage || isVideo) && !isSticker;
 
                     return (
                       <Fragment key={m.id}>
@@ -752,8 +860,9 @@ export default function ChatPage() {
                             {dayLabel(m.timestamp)}
                           </div>
                         )}
-                        <div id={`msg-${m.id}`} style={{ display: 'flex', flexDirection: 'column', alignItems: isAgent ? 'flex-end' : 'flex-start', maxWidth: '75%', alignSelf: isAgent ? 'flex-end' : 'flex-start' }}>
+                        <div id={`msg-${m.id}`} style={{ display: 'flex', flexDirection: 'column', alignItems: isAgent ? 'flex-end' : 'flex-start', maxWidth: '75%', width: isMediaCard ? 'min(320px, 100%)' : undefined, alignSelf: isAgent ? 'flex-end' : 'flex-start' }}>
                         <div style={{
+                          width: isMediaCard ? '100%' : undefined,
                           padding: (isImage || isVideo) && !m.text ? '0' : '1rem 1.25rem',
                           borderRadius: isAgent ? '20px 20px 4px 20px' : '20px 20px 20px 4px',
                           background: isSticker
@@ -804,41 +913,44 @@ export default function ChatPage() {
                           {hasMedia && (
                             <div style={{ marginBottom: m.text ? '0.75rem' : '0' }}>
                               {isImage && (
-                                <img 
-                                  src={m.mediaUrl!} 
-                                  alt={m.fileName || "Imagen"} 
+                                <img
+                                  src={m.mediaUrl!}
+                                  alt={m.fileName || "Imagen"}
                                   onClick={() => setLightboxUrl(m.mediaUrl!)}
-                                  style={{ 
-                                    maxWidth: isSticker ? '120px' : '100%', 
-                                    maxHeight: isSticker ? '120px' : '300px', 
-                                    borderRadius: isSticker ? '0' : '16px', 
+                                  style={isSticker ? {
+                                    maxWidth: '120px',
+                                    maxHeight: '120px',
+                                    borderRadius: '0',
                                     display: 'block',
                                     objectFit: 'contain',
                                     cursor: 'zoom-in'
-                                  }} 
+                                  } : {
+                                    width: '100%',
+                                    height: 'auto',
+                                    maxHeight: '420px',
+                                    borderRadius: '16px',
+                                    display: 'block',
+                                    objectFit: 'cover',
+                                    cursor: 'zoom-in'
+                                  }}
                                 />
                               )}
                               {isVideo && (
-                                <video 
-                                  src={m.mediaUrl!} 
-                                  controls 
-                                  style={{ 
-                                    maxWidth: '100%', 
-                                    maxHeight: '300px', 
-                                    borderRadius: '16px', 
-                                    display: 'block' 
-                                  }} 
+                                <video
+                                  src={m.mediaUrl!}
+                                  controls
+                                  style={{
+                                    width: '100%',
+                                    height: 'auto',
+                                    maxHeight: '420px',
+                                    borderRadius: '16px',
+                                    display: 'block',
+                                    objectFit: 'cover',
+                                  }}
                                 />
                               )}
                               {isAudio && (
-                                <audio 
-                                  src={m.mediaUrl!} 
-                                  controls 
-                                  style={{ 
-                                    maxWidth: '100%', 
-                                    display: 'block' 
-                                  }} 
-                                />
+                                <AudioPlayer src={m.mediaUrl!} isAgent={isAgent} />
                               )}
                               {isDocument && (
                                 <a 

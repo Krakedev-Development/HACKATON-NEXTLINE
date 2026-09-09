@@ -7,9 +7,12 @@ import {
   isLoggedIn,
   getMe,
   getTemplatesFromMeta,
+  uploadBroadcastTemplateMedia,
+  getBroadcastTemplateMedia,
   type TemplateItem,
 } from '@/lib/api';
 import { humanizeTemplateName } from '@/lib/format';
+import { FileDropzone } from '@/shared/ui/molecules/file-dropzone';
 
 // --- Icons ---
 function TemplateIcon({ style }: { style?: React.CSSProperties }) {
@@ -45,6 +48,13 @@ export default function TemplatesPage() {
   const [error, setError] = useState('');
   const [refreshingMeta, setRefreshingMeta] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const [headerPreviewUrl, setHeaderPreviewUrl] = useState('');
+  const [headerFileName, setHeaderFileName] = useState('');
+  const [headerUploading, setHeaderUploading] = useState(false);
+  const [headerUploadError, setHeaderUploadError] = useState('');
+  const [usingSavedHeader, setUsingSavedHeader] = useState(false);
+  const [loadingSavedHeader, setLoadingSavedHeader] = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -87,6 +97,51 @@ export default function TemplatesPage() {
   }
 
   const selectedTemplate = templates.find((t) => t.id === selectedId);
+
+  useEffect(() => {
+    return () => {
+      if (headerPreviewUrl) URL.revokeObjectURL(headerPreviewUrl);
+    };
+  }, [headerPreviewUrl]);
+
+  // Al elegir una plantilla con header de imagen/video/documento, trae el último archivo
+  // subido para esa misma plantilla (el mismo que usa Masivos) en vez de partir en blanco.
+  useEffect(() => {
+    setHeaderPreviewUrl('');
+    setHeaderFileName('');
+    setHeaderUploadError('');
+    setUsingSavedHeader(false);
+
+    if (!selectedTemplate?.header || selectedTemplate.header.format === 'TEXT') return;
+
+    setLoadingSavedHeader(true);
+    getBroadcastTemplateMedia(selectedTemplate.id)
+      .then(({ saved }) => {
+        if (!saved) return;
+        setHeaderPreviewUrl(saved.mediaUrl);
+        setHeaderFileName(saved.fileName || 'Archivo guardado');
+        setUsingSavedHeader(true);
+      })
+      .catch(() => {})
+      .finally(() => setLoadingSavedHeader(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
+
+  const handleHeaderFile = async (file: File) => {
+    if (!selectedTemplate) return;
+    setHeaderPreviewUrl(URL.createObjectURL(file));
+    setHeaderUploading(true);
+    setHeaderUploadError('');
+    setUsingSavedHeader(false);
+    try {
+      await uploadBroadcastTemplateMedia(file, selectedTemplate.id);
+      setHeaderFileName(file.name);
+    } catch (err) {
+      setHeaderUploadError(err instanceof Error ? err.message : 'Error al subir el archivo.');
+    } finally {
+      setHeaderUploading(false);
+    }
+  };
 
   // Helper para resaltar variables en el cuerpo
   const renderBodyWithHighlights = (body: string) => {
@@ -183,7 +238,7 @@ export default function TemplatesPage() {
               {/* Contenido de la plantilla ya existente... */}
               <header style={{ marginBottom: '3rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
                       <button 
                         onClick={() => setSidebarOpen(true)} 
                         className="mob-sidebar-btn"
@@ -195,6 +250,15 @@ export default function TemplatesPage() {
                       </button>
                       <h1 style={{ fontSize: '2rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '-0.02em', margin: 0 }}>{humanizeTemplateName(selectedTemplate.name).label}</h1>
                     <div style={{ padding: '0.2rem 0.6rem', background: 'rgba(74, 222, 128, 0.1)', border: '1px solid rgba(74, 222, 128, 0.2)', borderRadius: '6px', color: '#4ADE80', fontSize: '0.65rem', fontWeight: 900, textTransform: 'uppercase' }}>APROBADA</div>
+                    {selectedTemplate.header && selectedTemplate.header.format !== 'TEXT' ? (
+                      <div style={{ padding: '0.2rem 0.6rem', background: 'rgba(6, 104, 250, 0.1)', border: '1px solid rgba(6, 104, 250, 0.25)', borderRadius: '6px', color: '#0668FA', fontSize: '0.65rem', fontWeight: 900, textTransform: 'uppercase' }}>
+                        Multimedia: {selectedTemplate.header.format}
+                      </div>
+                    ) : (
+                      <div style={{ padding: '0.2rem 0.6rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', color: '#555', fontSize: '0.65rem', fontWeight: 900, textTransform: 'uppercase' }}>
+                        Sin Multimedia
+                      </div>
+                    )}
                   </div>
                   <p style={{ color: '#666', fontSize: '0.95rem' }}>Estructura oficial sincronizada directamente desde el Business Manager de Meta.</p>
                 </div>
@@ -233,6 +297,65 @@ export default function TemplatesPage() {
                   ))}
                 </div>
               </div>
+
+              {selectedTemplate.header && selectedTemplate.header.format !== 'TEXT' && (
+                <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '24px', padding: '2rem', marginTop: '1.5rem' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'block', marginBottom: '1rem' }}>
+                    Archivo de {selectedTemplate.header.format.toLowerCase()} para el Encabezado
+                  </label>
+
+                  <div style={{ padding: '0.85rem 1rem', background: 'rgba(6, 104, 250, 0.06)', border: '1px solid rgba(6, 104, 250, 0.15)', borderRadius: '12px', marginBottom: '1.25rem', display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0668FA" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: '0.1rem' }}><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+                    <p style={{ margin: 0, fontSize: '0.8rem', color: '#8C8C8C', lineHeight: 1.5 }}>
+                      Esta plantilla no se puede editar (debe coincidir con la estructura aprobada en Meta), pero podés cargar o reemplazar el archivo de {selectedTemplate.header.format.toLowerCase()} que se envía en el encabezado. Tiene que ser el mismo archivo (o uno equivalente) al que está aprobado en Meta para esta plantilla. Se guarda y se usa automáticamente al enviarla desde Masivos.
+                    </p>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                    <FileDropzone
+                      accept={
+                        selectedTemplate.header.format === 'IMAGE' ? 'image/*'
+                          : selectedTemplate.header.format === 'VIDEO' ? 'video/*'
+                          : undefined
+                      }
+                      onFile={handleHeaderFile}
+                      disabled={headerUploading}
+                      hint={selectedTemplate.header.format.toLowerCase()}
+                    />
+                    {headerPreviewUrl && (selectedTemplate.header.format === 'IMAGE' || selectedTemplate.header.format === 'VIDEO') && (
+                      <div style={{ display: 'flex', justifyContent: 'center' }}>
+                        {selectedTemplate.header.format === 'IMAGE' ? (
+                          <Image
+                            src={headerPreviewUrl}
+                            alt="Vista previa del encabezado"
+                            width={220}
+                            height={220}
+                            unoptimized
+                            style={{ maxWidth: '220px', maxHeight: '220px', width: 'auto', height: 'auto', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)', objectFit: 'cover' }}
+                          />
+                        ) : (
+                          // eslint-disable-next-line jsx-a11y/media-has-caption
+                          <video
+                            src={headerPreviewUrl}
+                            controls
+                            style={{ maxWidth: '320px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)' }}
+                          />
+                        )}
+                      </div>
+                    )}
+                    {loadingSavedHeader && <p style={{ margin: 0, fontSize: '0.75rem', color: '#999' }}>Buscando archivo guardado...</p>}
+                    {headerUploading && <p style={{ margin: 0, fontSize: '0.75rem', color: '#999' }}>Subiendo archivo...</p>}
+                    {!headerUploading && headerFileName && (
+                      <p style={{ margin: 0, fontSize: '0.75rem', color: '#22C55E' }}>
+                        {usingSavedHeader ? `Usando archivo guardado: ${headerFileName} (subí uno nuevo para reemplazarlo)` : `Archivo listo: ${headerFileName}`}
+                      </p>
+                    )}
+                    {headerUploadError && (
+                      <p style={{ margin: 0, fontSize: '0.75rem', color: '#EF4444' }}>{headerUploadError}</p>
+                    )}
+                  </div>
+                </div>
+              )}
 
               <div style={{ marginTop: '3rem', padding: '1.5rem', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', gap: '1rem', opacity: 0.5 }}>
                 <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#1A1A1A', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
