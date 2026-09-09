@@ -23,12 +23,21 @@ export class ContactsController {
     @Query('limit') limit?: string,
     @Query('q') q?: string,
     @Query('campaignIds') campaignIds?: string,
+    @Query('agentIds') agentIds?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
   ) {
     return this.contacts.findAll(
       user.organizationId!,
       user.userId,
       user.role,
-      { q, campaignIds: campaignIds ? campaignIds.split(',').filter(Boolean) : undefined },
+      {
+        q,
+        campaignIds: campaignIds ? campaignIds.split(',').filter(Boolean) : undefined,
+        agentIds: agentIds ? agentIds.split(',').filter(Boolean) : undefined,
+        dateFrom,
+        dateTo,
+      },
       cursor,
       limit ? parseInt(limit, 10) : undefined,
     );
@@ -39,10 +48,16 @@ export class ContactsController {
     @CurrentUser() user: AuthUser,
     @Query('q') q?: string,
     @Query('campaignIds') campaignIds?: string,
+    @Query('agentIds') agentIds?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
   ) {
     const ids = await this.contacts.findAllIds(user.organizationId!, user.userId, user.role, {
       q,
       campaignIds: campaignIds ? campaignIds.split(',').filter(Boolean) : undefined,
+      agentIds: agentIds ? agentIds.split(',').filter(Boolean) : undefined,
+      dateFrom,
+      dateTo,
     });
     return { ids };
   }
@@ -118,5 +133,28 @@ export class ContactsController {
       body.campaignIds,
     );
     return { ok: true, byCampaign: map };
+  }
+
+  @Post('agent-contacts')
+  @Roles(UserRole.ORG_ADMIN)
+  async getAgentContacts(
+    @CurrentUser() user: AuthUser,
+    @Body() body: { agentIds: string[]; dateFrom?: string; dateTo?: string },
+  ) {
+    const map = await this.contacts.getAgentContactMap(
+      user.organizationId!,
+      body.agentIds || [],
+      body.dateFrom,
+      body.dateTo,
+    );
+    return { ok: true, byAgent: map };
+  }
+
+  @Post('import-excel')
+  async importExcel(
+    @CurrentUser() user: AuthUser,
+    @Body() body: { rows: Array<{ name?: string; phone: string; email?: string; tag?: string }> },
+  ) {
+    return this.contacts.importFromExcel(user.organizationId!, body.rows || []);
   }
 }

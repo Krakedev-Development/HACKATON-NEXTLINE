@@ -301,21 +301,23 @@ export interface BroadcastContactsPage {
   total: number;
 }
 
-export async function getBroadcastContacts(params?: { cursor?: string; limit?: number; q?: string; campaignIds?: string[] }): Promise<BroadcastContactsPage> {
+export async function getBroadcastContacts(params?: { cursor?: string; limit?: number; q?: string; campaignIds?: string[]; tagIds?: string[] }): Promise<BroadcastContactsPage> {
   const qs = new URLSearchParams();
   if (params?.cursor) qs.set('cursor', params.cursor);
   if (params?.limit) qs.set('limit', String(params.limit));
   if (params?.q?.trim()) qs.set('q', params.q.trim());
   if (params?.campaignIds?.length) qs.set('campaignIds', params.campaignIds.join(','));
+  if (params?.tagIds?.length) qs.set('tagIds', params.tagIds.join(','));
   const query = qs.toString();
   return api<BroadcastContactsPage>(`/broadcast/contacts${query ? `?${query}` : ''}`);
 }
 
-export async function getBroadcastContactIds(params?: { q?: string; onlyCanSend?: boolean; campaignIds?: string[] }): Promise<string[]> {
+export async function getBroadcastContactIds(params?: { q?: string; onlyCanSend?: boolean; campaignIds?: string[]; tagIds?: string[] }): Promise<string[]> {
   const qs = new URLSearchParams();
   if (params?.q?.trim()) qs.set('q', params.q.trim());
   if (params?.onlyCanSend) qs.set('onlyCanSend', 'true');
   if (params?.campaignIds?.length) qs.set('campaignIds', params.campaignIds.join(','));
+  if (params?.tagIds?.length) qs.set('tagIds', params.tagIds.join(','));
   const query = qs.toString();
   const res = await api<{ ids: string[] }>(`/broadcast/contacts/ids${query ? `?${query}` : ''}`);
   return res.ids;
@@ -406,20 +408,26 @@ export interface ContactsPage {
   total: number;
 }
 
-export async function getContactsList(params?: { cursor?: string; limit?: number; q?: string; campaignIds?: string[] }): Promise<ContactsPage> {
+export async function getContactsList(params?: { cursor?: string; limit?: number; q?: string; campaignIds?: string[]; agentIds?: string[]; dateFrom?: string; dateTo?: string }): Promise<ContactsPage> {
   const qs = new URLSearchParams();
   if (params?.cursor) qs.set('cursor', params.cursor);
   if (params?.limit) qs.set('limit', String(params.limit));
   if (params?.q?.trim()) qs.set('q', params.q.trim());
   if (params?.campaignIds?.length) qs.set('campaignIds', params.campaignIds.join(','));
+  if (params?.agentIds?.length) qs.set('agentIds', params.agentIds.join(','));
+  if (params?.dateFrom) qs.set('dateFrom', params.dateFrom);
+  if (params?.dateTo) qs.set('dateTo', params.dateTo);
   const query = qs.toString();
   return api<ContactsPage>(`/contacts${query ? `?${query}` : ''}`);
 }
 
-export async function getContactIds(params?: { q?: string; campaignIds?: string[] }): Promise<string[]> {
+export async function getContactIds(params?: { q?: string; campaignIds?: string[]; agentIds?: string[]; dateFrom?: string; dateTo?: string }): Promise<string[]> {
   const qs = new URLSearchParams();
   if (params?.q?.trim()) qs.set('q', params.q.trim());
   if (params?.campaignIds?.length) qs.set('campaignIds', params.campaignIds.join(','));
+  if (params?.agentIds?.length) qs.set('agentIds', params.agentIds.join(','));
+  if (params?.dateFrom) qs.set('dateFrom', params.dateFrom);
+  if (params?.dateTo) qs.set('dateTo', params.dateTo);
   const query = qs.toString();
   const res = await api<{ ids: string[] }>(`/contacts/ids${query ? `?${query}` : ''}`);
   return res.ids;
@@ -452,6 +460,22 @@ export async function updateContact(
   });
 }
 
+export interface ImportContactsResult {
+  created: number;
+  updated: number;
+  rejected: number;
+  unmatchedTags: number;
+}
+
+export async function importContactsExcel(
+  rows: Array<{ name?: string; phone: string; email?: string; tag?: string }>,
+): Promise<ImportContactsResult> {
+  return api('/contacts/import-excel', {
+    method: 'POST',
+    body: JSON.stringify({ rows }),
+  });
+}
+
 // Plantillas (para Mensajes masivos > Plantilla aprobada)
 export interface TemplateItem {
   id: string;
@@ -461,6 +485,7 @@ export interface TemplateItem {
   createdAt?: number;
   updatedAt?: number;
   language?: string;
+  header?: BroadcastTemplateHeader;
 }
 
 /** Plantillas aprobadas de la cuenta WhatsApp Business (Meta). Mismo formato que TemplateItem. */
@@ -936,6 +961,7 @@ export interface ImportExcelContactsResult {
   created: number;
   updated: number;
   rejected: number;
+  unmatchedTags: number;
   errors: Array<{ phone?: string; error: string }>;
   newContactIds: string[];
   conversationIds: string[];
@@ -943,7 +969,7 @@ export interface ImportExcelContactsResult {
 }
 
 export async function importExcelContacts(
-  contacts: Array<{ name?: string; phone: string }>,
+  contacts: Array<{ name?: string; phone: string; tag?: string }>,
   listName?: string,
 ): Promise<ImportExcelContactsResult> {
   return api<ImportExcelContactsResult>('/broadcast-lists/import-excel', {
@@ -1052,6 +1078,7 @@ export interface ExportContactRow {
   name: string;
   phone: string;
   agent: string;
+  createdAt: number;
 }
 
 export interface ExportCampaignInfo {
@@ -1088,6 +1115,17 @@ export async function getCampaignContactMap(
   return api('/contacts/campaign-contacts', {
     method: 'POST',
     body: JSON.stringify({ campaignIds }),
+  });
+}
+
+export async function getAgentContactMap(
+  agentIds: string[],
+  dateFrom?: string,
+  dateTo?: string,
+): Promise<{ ok: boolean; byAgent: Record<string, string[]> }> {
+  return api('/contacts/agent-contacts', {
+    method: 'POST',
+    body: JSON.stringify({ agentIds, dateFrom, dateTo }),
   });
 }
 

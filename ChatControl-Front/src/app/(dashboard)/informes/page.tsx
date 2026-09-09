@@ -9,11 +9,10 @@ import {
   getContactsList,
   getContactIds,
   exportContacts,
-  getCampaigns,
-  getCampaignContactMap,
+  getOrgUsers,
+  getAgentContactMap,
   type ContactItem,
   type MeResponse,
-  type Campaign,
 } from '@/lib/api';
 import { formatPhoneDisplay } from '@/lib/format';
 
@@ -48,10 +47,13 @@ function CheckIcon({ style }: { style?: React.CSSProperties }) {
 }
 
 // Column preview icons (SVG, red-themed)
-function CampaignIcon() {
+function CalendarIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+      <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+      <line x1="16" y1="2" x2="16" y2="6" />
+      <line x1="8" y1="2" x2="8" y2="6" />
+      <line x1="3" y1="10" x2="21" y2="10" />
     </svg>
   );
 }
@@ -125,6 +127,26 @@ function CloseIcon() {
   );
 }
 
+type ColumnKey = 'date' | 'form' | 'email' | 'name' | 'phone' | 'agent';
+
+const COLUMNS: Array<{ key: ColumnKey; label: string; desc: string; icon: React.ReactElement }> = [
+  { key: 'date', label: 'Fecha', desc: 'Fecha de registro', icon: <CalendarIcon /> },
+  { key: 'form', label: 'Formulario', desc: 'WSP KRAKE DEV', icon: <FormIcon /> },
+  { key: 'email', label: 'Correo', desc: 'Email del contacto', icon: <MailIcon /> },
+  { key: 'name', label: 'Nombre', desc: 'Nombre registrado', icon: <UserIcon /> },
+  { key: 'phone', label: 'Teléfono', desc: 'Número WhatsApp', icon: <PhoneIcon /> },
+  { key: 'agent', label: 'Agente', desc: 'Agente asignado', icon: <AgentIcon /> },
+];
+
+const COLUMN_EXPORT_MAP: Record<ColumnKey, { header: string; width: number; value: (r: { form_name: string; email: string; name: string; phone: string; agent: string; createdAt: number }) => string }> = {
+  date: { header: 'Fecha de Registro', width: 18, value: (r) => new Date(r.createdAt).toLocaleDateString() },
+  form: { header: 'Formulario', width: 20, value: (r) => r.form_name },
+  email: { header: 'Correo Electrónico', width: 30, value: (r) => r.email },
+  name: { header: 'Nombre', width: 25, value: (r) => r.name },
+  phone: { header: 'Número de Teléfono', width: 20, value: (r) => r.phone },
+  agent: { header: 'Agente', width: 25, value: (r) => r.agent },
+};
+
 // ── Main Page ──────────────────────────────────────────
 
 export default function InformesPage() {
@@ -146,16 +168,22 @@ export default function InformesPage() {
   const [exportSuccess, setExportSuccess] = useState(false);
   const [exportError, setExportError] = useState('');
 
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [selectedCampaignIds, setSelectedCampaignIds] = useState<Set<string>>(new Set());
-  const [campaignContactMap, setCampaignContactMap] = useState<Record<string, string[]>>({});
-  const [loadingCampaigns, setLoadingCampaigns] = useState(false);
-  const [campaignSearch, setCampaignSearch] = useState('');
+  const [agents, setAgents] = useState<Array<{ id: string; email: string; displayName: string | null }>>([]);
+  const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(new Set());
+  const [agentContactMap, setAgentContactMap] = useState<Record<string, string[]>>({});
+  const [agentSearch, setAgentSearch] = useState('');
 
-  const filteredCampaigns = campaigns.filter(c =>
-    !campaignSearch.trim() ||
-    c.name.toLowerCase().includes(campaignSearch.toLowerCase()) ||
-    (c.description?.toLowerCase().includes(campaignSearch.toLowerCase()) ?? false)
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+
+  const [selectedColumns, setSelectedColumns] = useState<Set<ColumnKey>>(
+    new Set<ColumnKey>(['date', 'form', 'email', 'name', 'phone', 'agent'])
+  );
+
+  const filteredAgents = agents.filter(a =>
+    !agentSearch.trim() ||
+    (a.displayName?.toLowerCase().includes(agentSearch.toLowerCase()) ?? false) ||
+    a.email.toLowerCase().includes(agentSearch.toLowerCase())
   );
 
   useEffect(() => { setMounted(true); }, []);
@@ -169,29 +197,40 @@ export default function InformesPage() {
   useEffect(() => {
     if (!mounted) return;
     if (!isLoggedIn()) { router.replace('/login'); return; }
-    setLoadingCampaigns(true);
     (async () => {
       try {
-        const [meData, campaignsData] = await Promise.all([getMe(), getCampaigns()]);
+        const meData = await getMe();
         setMe(meData);
-        setCampaigns(campaignsData);
 
-        // Precargar mapa campaña → contactos para todas las campañas
-        if (campaignsData.length > 0) {
-          const allIds = campaignsData.map(c => c.id);
-          const res = await getCampaignContactMap(allIds);
-          setCampaignContactMap(res.byCampaign);
+        // Filtro por agente: solo tiene sentido para ORG_ADMIN (un agente ya ve solo lo suyo)
+        if (meData.role === 'ORG_ADMIN') {
+          const orgUsers = await getOrgUsers();
+          const agentUsers = orgUsers.filter(u => u.role === 'AGENT');
+          setAgents(agentUsers);
         }
-      } catch (err) { } finally { setLoadingCampaigns(false); }
+      } catch (err) { }
     })();
   }, [mounted, router]);
 
-  async function loadFirstPage(q: string, campaignIds: string[]) {
+  // El mapa agente → contactos depende del filtro de fecha activo: se recarga cada vez que
+  // cambian las fechas para que el conteo y la selección por agente respeten el rango elegido.
+  useEffect(() => {
+    if (agents.length === 0) return;
+    (async () => {
+      try {
+        const agentIds = agents.map(a => a.id);
+        const res = await getAgentContactMap(agentIds, dateFrom, dateTo);
+        setAgentContactMap(res.byAgent);
+      } catch (err) { }
+    })();
+  }, [agents, dateFrom, dateTo]);
+
+  async function loadFirstPage(q: string, agentIds: string[], from: string, to: string) {
     setLoading(true);
     try {
       const [page, ids] = await Promise.all([
-        getContactsList({ q, campaignIds, limit: PAGE_SIZE }),
-        getContactIds({ q, campaignIds }),
+        getContactsList({ q, agentIds, dateFrom: from, dateTo: to, limit: PAGE_SIZE }),
+        getContactIds({ q, agentIds, dateFrom: from, dateTo: to }),
       ]);
       setContacts(page.contacts);
       setNextCursor(page.nextCursor);
@@ -204,7 +243,7 @@ export default function InformesPage() {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
     try {
-      const page = await getContactsList({ q: debouncedQuery, campaignIds: Array.from(selectedCampaignIds), limit: PAGE_SIZE, cursor: nextCursor });
+      const page = await getContactsList({ q: debouncedQuery, agentIds: Array.from(selectedAgentIds), dateFrom, dateTo, limit: PAGE_SIZE, cursor: nextCursor });
       setContacts(prev => [...prev, ...page.contacts]);
       setNextCursor(page.nextCursor);
       setTotal(page.total);
@@ -213,8 +252,8 @@ export default function InformesPage() {
 
   useEffect(() => {
     if (!mounted || !isLoggedIn()) return;
-    loadFirstPage(debouncedQuery, Array.from(selectedCampaignIds));
-  }, [mounted, debouncedQuery, selectedCampaignIds]);
+    loadFirstPage(debouncedQuery, Array.from(selectedAgentIds), dateFrom, dateTo);
+  }, [mounted, debouncedQuery, selectedAgentIds, dateFrom, dateTo]);
 
   function handleListScroll(e: React.UIEvent<HTMLDivElement>) {
     const el = e.currentTarget;
@@ -242,78 +281,56 @@ export default function InformesPage() {
     setSelectedIds(next);
   };
 
-  const toggleCampaign = (campaignId: string) => {
-    const nextCampaigns = new Set(selectedCampaignIds);
+  const toggleAgent = (agentId: string) => {
+    const nextAgents = new Set(selectedAgentIds);
     const nextContacts = new Set(selectedIds);
 
-    if (nextCampaigns.has(campaignId)) {
-      nextCampaigns.delete(campaignId);
-      const toRemove = campaignContactMap[campaignId] || [];
+    if (nextAgents.has(agentId)) {
+      nextAgents.delete(agentId);
+      const toRemove = agentContactMap[agentId] || [];
       for (const cid of toRemove) nextContacts.delete(cid);
     } else {
-      nextCampaigns.add(campaignId);
-      const ids = campaignContactMap[campaignId] || [];
+      nextAgents.add(agentId);
+      const ids = agentContactMap[agentId] || [];
       for (const cid of ids) nextContacts.add(cid);
     }
 
-    setSelectedCampaignIds(nextCampaigns);
+    setSelectedAgentIds(nextAgents);
     setSelectedIds(nextContacts);
   };
 
+  const toggleColumn = (key: ColumnKey) => {
+    setSelectedColumns(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
   const handleExport = async () => {
-    if (selectedIds.size === 0) return;
+    if (selectedIds.size === 0 || selectedColumns.size === 0) return;
     setExporting(true);
     setExportSuccess(false);
     setExportError('');
     try {
       const ids = Array.from(selectedIds);
-      const campaignIds = selectedCampaignIds.size > 0 ? Array.from(selectedCampaignIds) : undefined;
-      const { rows, byCampaign } = await exportContacts(ids, campaignIds);
+      const { rows } = await exportContacts(ids);
 
       const XLSX = await import('xlsx');
       const wb = XLSX.utils.book_new();
       const date = new Date().toISOString().split('T')[0];
 
-      const COL_HEADERS_CAMPAIGN = ['Campaña', 'Descripción', 'Fecha Campaña', 'Fecha Asignación', 'Formulario', 'Correo Electrónico', 'Nombre', 'Número de Teléfono', 'Agente'];
-      const COL_HEADERS_FLAT = ['Campaña', 'Formulario', 'Correo Electrónico', 'Nombre', 'Número de Teléfono', 'Agente'];
-
-      if (byCampaign && byCampaign.length > 0) {
-        // Una hoja por campaña
-        for (const group of byCampaign) {
-          const sheetName = group.campaign.name.slice(0, 31);
-          const data = [
-            COL_HEADERS_CAMPAIGN,
-            ...group.contacts.map(r => [
-              r.campaign_name,
-              group.campaign.description || '',
-              new Date(group.campaign.createdAt).toLocaleDateString(),
-              r.assignedAt ? new Date(r.assignedAt).toLocaleString() : '',
-              r.form_name,
-              r.email,
-              r.name,
-              r.phone,
-              r.agent,
-            ]),
-          ];
-          const ws = XLSX.utils.aoa_to_sheet(data);
-          ws['!cols'] = [
-            { wch: 25 }, { wch: 30 }, { wch: 15 }, { wch: 20 },
-            { wch: 20 }, { wch: 30 }, { wch: 25 }, { wch: 20 }, { wch: 25 },
-          ];
-          XLSX.utils.book_append_sheet(wb, ws, sheetName);
-        }
-      } else {
-        // Exportación plana (comportamiento original)
-        const worksheetData = [
-          COL_HEADERS_FLAT,
-          ...rows.map(r => [r.campaign_name, r.form_name, r.email, r.name, r.phone, r.agent]),
-        ];
-        const ws = XLSX.utils.aoa_to_sheet(worksheetData);
-        ws['!cols'] = [
-          { wch: 25 }, { wch: 20 }, { wch: 30 }, { wch: 25 }, { wch: 20 }, { wch: 25 },
-        ];
-        XLSX.utils.book_append_sheet(wb, ws, 'Contactos');
-      }
+      const activeKeys = COLUMNS.filter(c => selectedColumns.has(c.key)).map(c => c.key);
+      const headers = activeKeys.map(key => COLUMN_EXPORT_MAP[key].header);
+      const widths = activeKeys.map(key => ({ wch: COLUMN_EXPORT_MAP[key].width }));
+      const worksheetData = [
+        headers,
+        ...rows.map(r => activeKeys.map(key => COLUMN_EXPORT_MAP[key].value(r))),
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(worksheetData);
+      ws['!cols'] = widths;
+      XLSX.utils.book_append_sheet(wb, ws, 'Contactos');
 
       XLSX.writeFile(wb, `informe_contactos_${date}.xlsx`);
 
@@ -330,15 +347,6 @@ export default function InformesPage() {
 
   if (!mounted) return null;
 
-  const COLUMNS = [
-    { label: 'Campaña', desc: 'Campaña activa', icon: <CampaignIcon /> },
-    { label: 'Formulario', desc: 'WSP KRAKE DEV', icon: <FormIcon /> },
-    { label: 'Correo', desc: 'Email del contacto', icon: <MailIcon /> },
-    { label: 'Nombre', desc: 'Nombre registrado', icon: <UserIcon /> },
-    { label: 'Teléfono', desc: 'Número WhatsApp', icon: <PhoneIcon /> },
-    { label: 'Agente', desc: 'Agente asignado', icon: <AgentIcon /> },
-  ];
-
   return (
     <div style={{ display: 'flex', width: '100%', height: '100vh', background: '#040404', color: '#F2F2F2', overflow: 'hidden' }}>
 
@@ -353,7 +361,7 @@ export default function InformesPage() {
             <div>
               <h2 style={{ fontSize: '1.25rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '-0.02em', margin: 0 }}>Contactos</h2>
               <p style={{ margin: '0.25rem 0 0', fontSize: '0.72rem', color: '#444', fontWeight: 600 }}>
-                {loading ? 'Cargando...' : `${contacts.length} total · ${selectedIds.size} seleccionados`}
+                {loading ? 'Cargando...' : `${total} total · ${selectedIds.size} seleccionados`}
               </p>
             </div>
             <div style={{ padding: '0.5rem', background: 'rgba(239,68,68,0.08)', borderRadius: '10px', color: '#EF4444' }}>
@@ -374,7 +382,7 @@ export default function InformesPage() {
           </div>
 
           {/* Select all row */}
-          {!loading && total > 0 && (
+          {total > 0 && (
             <div
               onClick={toggleAll}
               style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.65rem 0.75rem', borderRadius: '10px', cursor: 'pointer', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', transition: 'all 0.15s ease', userSelect: 'none' }}
@@ -388,11 +396,50 @@ export default function InformesPage() {
             </div>
           )}
 
-          {/* Campaign filter */}
-          {!loading && campaigns.length > 0 && (
+          {/* Date range filter */}
+          <div style={{ marginTop: '0.75rem', padding: '0.65rem 0.75rem', borderRadius: '10px', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+              <p style={{ margin: 0, fontSize: '0.65rem', fontWeight: 800, color: '#555', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                Filtrar por fecha de registro
+              </p>
+              {(dateFrom || dateTo) && (
+                <button
+                  type="button"
+                  onClick={() => { setDateFrom(''); setDateTo(''); }}
+                  title="Limpiar fechas"
+                  style={{ width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, background: 'transparent', border: 'none', color: '#555', cursor: 'pointer', flexShrink: 0 }}
+                >
+                  <CloseIcon />
+                </button>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                <label style={{ fontSize: '0.6rem', color: '#555', textTransform: 'uppercase' }}>Desde</label>
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  style={{ width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '8px', padding: '0.4rem 0.5rem', color: 'white', outline: 'none', fontSize: '0.72rem', boxSizing: 'border-box', colorScheme: 'dark' }}
+                />
+              </div>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                <label style={{ fontSize: '0.6rem', color: '#555', textTransform: 'uppercase' }}>Hasta</label>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  style={{ width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '8px', padding: '0.4rem 0.5rem', color: 'white', outline: 'none', fontSize: '0.72rem', boxSizing: 'border-box', colorScheme: 'dark' }}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Agent filter (solo ORG_ADMIN) */}
+          {me?.role === 'ORG_ADMIN' && agents.length > 0 && (
             <div style={{ marginTop: '0.75rem', padding: '0.65rem 0.75rem', borderRadius: '10px', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)' }}>
               <p style={{ margin: '0 0 0.5rem', fontSize: '0.65rem', fontWeight: 800, color: '#555', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                Filtrar por campaña
+                Filtrar por agente
               </p>
 
               {/* Search dentro del filtro */}
@@ -400,37 +447,36 @@ export default function InformesPage() {
                 <SearchIcon style={{ position: 'absolute', left: '0.5rem', top: '50%', transform: 'translateY(-50%)', color: '#444', width: '0.75rem', height: '0.75rem' }} />
                 <input
                   type="text"
-                  placeholder="Buscar campaña..."
-                  value={campaignSearch}
-                  onChange={(e) => setCampaignSearch(e.target.value)}
+                  placeholder="Buscar agente..."
+                  value={agentSearch}
+                  onChange={(e) => setAgentSearch(e.target.value)}
                   onClick={(e) => e.stopPropagation()}
                   style={{ width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '8px', padding: '0.4rem 0.5rem 0.4rem 1.6rem', color: 'white', outline: 'none', fontSize: '0.72rem', boxSizing: 'border-box' }}
                 />
               </div>
 
-              {/* Lista de campañas filtrada */}
+              {/* Lista de agentes filtrada */}
               <div style={{ maxHeight: '220px', overflowY: 'auto' }}>
-                {filteredCampaigns.length === 0 ? (
+                {filteredAgents.length === 0 ? (
                   <p style={{ fontSize: '0.7rem', color: '#555', padding: '0.5rem 0', textAlign: 'center' }}>
-                    {campaignSearch ? 'Sin resultados' : 'Sin campañas'}
+                    {agentSearch ? 'Sin resultados' : 'Sin agentes'}
                   </p>
-                ) : filteredCampaigns.map(c => {
-                  const isCampaignSelected = selectedCampaignIds.has(c.id);
-                  const contactCount = campaignContactMap[c.id]?.length || 0;
+                ) : filteredAgents.map(a => {
+                  const isAgentSelected = selectedAgentIds.has(a.id);
+                  const contactCount = agentContactMap[a.id]?.length || 0;
                   return (
                     <div
-                      key={c.id}
-                      onClick={() => toggleCampaign(c.id)}
-                      style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.4rem 0.25rem', borderRadius: '6px', cursor: 'pointer', userSelect: 'none', opacity: c.isActive ? 1 : 0.55 }}
+                      key={a.id}
+                      onClick={() => toggleAgent(a.id)}
+                      style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.4rem 0.25rem', borderRadius: '6px', cursor: 'pointer', userSelect: 'none' }}
                     >
-                      <div style={{ width: '16px', height: '16px', borderRadius: '4px', flexShrink: 0, border: `2px solid ${isCampaignSelected ? '#EF4444' : 'rgba(255,255,255,0.15)'}`, background: isCampaignSelected ? '#EF4444' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s ease' }}>
-                        {isCampaignSelected && <CheckIcon />}
+                      <div style={{ width: '16px', height: '16px', borderRadius: '4px', flexShrink: 0, border: `2px solid ${isAgentSelected ? '#EF4444' : 'rgba(255,255,255,0.15)'}`, background: isAgentSelected ? '#EF4444' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s ease' }}>
+                        {isAgentSelected && <CheckIcon />}
                       </div>
-                      <span style={{ fontSize: '0.78rem', fontWeight: 700, color: isCampaignSelected ? '#FFF' : '#AAA', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {c.name}
+                      <span style={{ fontSize: '0.78rem', fontWeight: 700, color: isAgentSelected ? '#FFF' : '#AAA', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {a.displayName || a.email}
                       </span>
                       <span style={{ fontSize: '0.6rem', color: '#555' }}>{contactCount}</span>
-                      {c.isActive && <span style={{ fontSize: '0.6rem', fontWeight: 800, color: '#4ADE80', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Activa</span>}
                     </div>
                   );
                 })}
@@ -518,37 +564,39 @@ export default function InformesPage() {
               <p style={{ margin: 0, color: '#555', fontSize: '0.85rem' }}>
                 {selectedIds.size === 0
                   ? 'Selecciona al menos un contacto de la lista para continuar.'
-                  : `${selectedIds.size} contacto${selectedIds.size > 1 ? 's' : ''} listo${selectedIds.size > 1 ? 's' : ''} para exportar.`}
+                  : selectedColumns.size === 0
+                    ? 'Selecciona al menos una columna para exportar.'
+                    : `${selectedIds.size} contacto${selectedIds.size > 1 ? 's' : ''} listo${selectedIds.size > 1 ? 's' : ''} para exportar.`}
               </p>
             </div>
 
             <button
               id="btn-export-excel"
               onClick={handleExport}
-              disabled={selectedIds.size === 0 || exporting}
+              disabled={selectedIds.size === 0 || selectedColumns.size === 0 || exporting}
               style={{
                 padding: '0.9rem 2rem',
                 background: exporting
                   ? 'rgba(255,255,255,0.05)'
                   : exportSuccess
                     ? 'linear-gradient(135deg, #22C55E 0%, #15803D 100%)'
-                    : selectedIds.size > 0
+                    : selectedIds.size > 0 && selectedColumns.size > 0
                       ? 'linear-gradient(135deg, #EF4444 0%, #991B1B 100%)'
                       : 'rgba(255,255,255,0.04)',
                 border: 'none',
                 borderRadius: '14px',
-                color: selectedIds.size > 0 || exporting ? 'white' : '#2A2A2A',
+                color: (selectedIds.size > 0 && selectedColumns.size > 0) || exporting ? 'white' : '#2A2A2A',
                 fontWeight: 800,
                 fontSize: '0.85rem',
                 textTransform: 'uppercase',
                 letterSpacing: '0.1em',
-                cursor: selectedIds.size === 0 || exporting ? 'not-allowed' : 'pointer',
+                cursor: selectedIds.size === 0 || selectedColumns.size === 0 || exporting ? 'not-allowed' : 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '0.6rem',
                 transition: 'all 0.3s ease',
-                boxShadow: selectedIds.size > 0 && !exporting && !exportSuccess ? '0 8px 20px rgba(239,68,68,0.25)' : 'none',
-                opacity: selectedIds.size === 0 && !exporting ? 0.35 : 1,
+                boxShadow: selectedIds.size > 0 && selectedColumns.size > 0 && !exporting && !exportSuccess ? '0 8px 20px rgba(239,68,68,0.25)' : 'none',
+                opacity: (selectedIds.size === 0 || selectedColumns.size === 0) && !exporting ? 0.35 : 1,
                 whiteSpace: 'nowrap',
                 flexShrink: 0,
               }}
@@ -573,17 +621,37 @@ export default function InformesPage() {
 
           {/* Column preview */}
           <div style={{ marginBottom: '2rem' }}>
-            <p style={{ fontSize: '0.68rem', fontWeight: 800, color: '#2A2A2A', textTransform: 'uppercase', letterSpacing: '0.14em', marginBottom: '1rem' }}>
+            <p style={{ fontSize: '0.68rem', fontWeight: 800, color: '#2A2A2A', textTransform: 'uppercase', letterSpacing: '0.14em', marginBottom: '0.4rem' }}>
               Columnas del archivo generado
             </p>
+            <p style={{ fontSize: '0.75rem', color: '#555', marginBottom: '1rem' }}>
+              Hacé clic en cada columna para incluirla o excluirla del reporte.
+            </p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '0.75rem' }}>
-              {COLUMNS.map(col => (
-                <div key={col.label} style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '14px', padding: '1.1rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                  <div style={{ color: '#EF4444' }}>{col.icon}</div>
-                  <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#EF4444' }}>{col.label}</span>
-                  <span style={{ fontSize: '0.7rem', color: '#333' }}>{col.desc}</span>
-                </div>
-              ))}
+              {COLUMNS.map(col => {
+                const isColSelected = selectedColumns.has(col.key);
+                return (
+                  <div
+                    key={col.key}
+                    onClick={() => toggleColumn(col.key)}
+                    style={{
+                      background: isColSelected ? 'rgba(239,68,68,0.04)' : 'rgba(255,255,255,0.02)',
+                      border: `1px solid ${isColSelected ? 'rgba(239,68,68,0.25)' : 'rgba(255,255,255,0.05)'}`,
+                      borderRadius: '14px', padding: '1.1rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.4rem',
+                      cursor: 'pointer', userSelect: 'none', transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ color: isColSelected ? '#EF4444' : '#444' }}>{col.icon}</div>
+                      <div style={{ width: '16px', height: '16px', borderRadius: '4px', flexShrink: 0, border: `2px solid ${isColSelected ? '#EF4444' : 'rgba(255,255,255,0.15)'}`, background: isColSelected ? '#EF4444' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s ease' }}>
+                        {isColSelected && <CheckIcon />}
+                      </div>
+                    </div>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 800, color: isColSelected ? '#EF4444' : '#666' }}>{col.label}</span>
+                    <span style={{ fontSize: '0.7rem', color: '#333' }}>{col.desc}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
 

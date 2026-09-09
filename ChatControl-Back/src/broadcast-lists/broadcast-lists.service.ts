@@ -34,6 +34,7 @@ export interface ImportExcelContactsResultDto {
   created: number;
   updated: number;
   rejected: number;
+  unmatchedTags: number;
   errors: Array<{ phone?: string; error: string }>;
   newContactIds: string[];
   conversationIds: string[];
@@ -202,17 +203,24 @@ export class BroadcastListsService {
     organizationId: string,
     userId: string | undefined,
     listName: string | undefined,
-    rows: Array<{ name?: string; phone: string }>,
+    rows: Array<{ name?: string; phone: string; tag?: string }>,
   ): Promise<ImportExcelContactsResultDto> {
     if (!rows?.length) {
       throw new BadRequestException('No hay contactos para importar');
     }
 
+    const tags = await this.prisma.tag.findMany({
+      where: { organizationId },
+      select: { id: true, name: true },
+    });
+    const tagIdByName = new Map(tags.map((t) => [t.name.trim().toUpperCase(), t.id]));
+
     const UPSERT_BATCH_SIZE = 50;
     const errors: Array<{ phone?: string; error: string }> = [];
     let rejected = 0;
+    let unmatchedTags = 0;
 
-    const prepared: Array<{ phone: string; name: string | null }> = [];
+    const prepared: Array<{ phone: string; name: string | null; tagId: string | null }> = [];
     const seenPhones = new Set<string>();
     for (const row of rows) {
       const phone = (row.phone || '').replace(/\D/g, '');
@@ -223,7 +231,16 @@ export class BroadcastListsService {
       }
       if (seenPhones.has(phone)) continue;
       seenPhones.add(phone);
-      prepared.push({ phone, name: row.name?.trim() || null });
+
+      let tagId: string | null = null;
+      const tagName = row.tag?.trim();
+      if (tagName) {
+        const matched = tagIdByName.get(tagName.toUpperCase());
+        if (matched) tagId = matched;
+        else unmatchedTags++;
+      }
+
+      prepared.push({ phone, name: row.name?.trim() || null, tagId });
     }
 
     if (!prepared.length) {
@@ -255,9 +272,13 @@ export class BroadcastListsService {
         chunk.map((item) =>
           this.prisma.contact.upsert({
             where: { organizationId_phone: { organizationId, phone: item.phone } },
-            create: { organizationId, phone: item.phone, name: item.name },
-            // Si la fila no trae nombre, no se pisa el nombre ya guardado del contacto existente.
-            update: item.name ? { name: item.name } : {},
+            create: { organizationId, phone: item.phone, name: item.name, tagId: item.tagId },
+            // Si la fila no trae nombre o etiqueta (o la etiqueta no existe), no se pisa el
+            // dato ya guardado del contacto existente.
+            update: {
+              ...(item.name ? { name: item.name } : {}),
+              ...(item.tagId ? { tagId: item.tagId } : {}),
+            },
             select: { id: true, phone: true },
           }),
         ),
@@ -312,6 +333,6 @@ export class BroadcastListsService {
     const updated = prepared.length - created;
     const newContactIds = newContactPhones.map((p) => contactByPhone.get(p)!);
 
-    return { listId: list.id, created, updated, rejected, errors, newContactIds, conversationIds, outOfWindowCount };
+    return { listId: list.id, created, updated, rejected, unmatchedTags, errors, newContactIds, conversationIds, outOfWindowCount };
   }
 }

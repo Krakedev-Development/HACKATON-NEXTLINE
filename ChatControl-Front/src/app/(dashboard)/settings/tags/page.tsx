@@ -13,6 +13,22 @@ import {
   type Tag,
 } from '@/lib/api';
 
+function ChevronLeftIcon() {
+  return (
+    <svg style={{ width: '1rem', height: '1rem' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m15 18-6-6 6-6" />
+    </svg>
+  );
+}
+
+function ChevronRightIcon() {
+  return (
+    <svg style={{ width: '1rem', height: '1rem' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m9 18 6-6-6-6" />
+    </svg>
+  );
+}
+
 export default function TagsPage() {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
@@ -26,6 +42,8 @@ export default function TagsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
 
   useEffect(() => {
     setMounted(true);
@@ -124,6 +142,14 @@ export default function TagsPage() {
     }
   };
 
+  const totalPages = Math.ceil(tags.length / itemsPerPage) || 1;
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedTags = tags.slice(startIndex, startIndex + itemsPerPage);
+
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [totalPages, currentPage]);
+
   if (!mounted || !isLoggedIn()) return null;
 
   return (
@@ -167,15 +193,16 @@ export default function TagsPage() {
                     id="tag-name"
                     type="text"
                     required
-                    placeholder="Ej: Cliente VIP"
+                    placeholder="Ej: CLIENTE VIP"
                     value={name}
-                    onChange={(e) => setName(e.target.value)}
+                    onChange={(e) => setName(e.target.value.toUpperCase())}
                     style={{
                       width: '100%',
                       background: 'rgba(255,255,255,0.05)',
                       border: '1px solid rgba(64,64,64,0.3)',
                       borderRadius: 10,
                       padding: '0.85rem 1rem',
+                      textTransform: 'uppercase',
                       color: '#F2F2F2',
                       fontSize: '0.95rem',
                       outline: 'none',
@@ -229,7 +256,7 @@ export default function TagsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {tags.map((t) => {
+                    {paginatedTags.map((t) => {
                       const isEditing = editingId === t.id;
                       return (
                         <tr key={t.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.02)', transition: 'background 0.2s' }} onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.01)'} onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
@@ -238,9 +265,9 @@ export default function TagsPage() {
                               <input
                                 type="text"
                                 value={editingName}
-                                onChange={(e) => setEditingName(e.target.value)}
+                                onChange={(e) => setEditingName(e.target.value.toUpperCase())}
                                 autoFocus
-                                style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 8, padding: '0.5rem 0.75rem', color: '#F2F2F2', fontSize: '0.9rem', outline: 'none' }}
+                                style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 8, padding: '0.5rem 0.75rem', color: '#F2F2F2', fontSize: '0.9rem', outline: 'none', textTransform: 'uppercase' }}
                               />
                             ) : (
                               t.name
@@ -337,6 +364,62 @@ export default function TagsPage() {
                     })}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {tags.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', marginTop: '1.5rem', padding: '0 0.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#444', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Ver</span>
+                  <select
+                    value={itemsPerPage}
+                    onChange={(e) => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}
+                    style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(64,64,64,0.3)', borderRadius: 8, color: '#F2F2F2', fontSize: '0.75rem', padding: '0.4rem 0.6rem', outline: 'none' }}
+                  >
+                    <option value={10} style={{ background: '#0d0d0d' }}>10</option>
+                    <option value={20} style={{ background: '#0d0d0d' }}>20</option>
+                  </select>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+                  <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#8C8C8C', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                    Página <strong style={{ color: '#F2F2F2' }}>{currentPage}</strong> de <strong style={{ color: '#F2F2F2' }}>{totalPages}</strong>
+                  </span>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button
+                      type="button"
+                      disabled={currentPage === 1}
+                      onClick={() => setCurrentPage((p) => p - 1)}
+                      style={{
+                        padding: '0.5rem',
+                        borderRadius: 8,
+                        border: `1px solid ${currentPage === 1 ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.1)'}`,
+                        background: 'transparent',
+                        color: currentPage === 1 ? '#444' : '#F2F2F2',
+                        cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
+                        display: 'flex',
+                      }}
+                    >
+                      <ChevronLeftIcon />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={currentPage === totalPages}
+                      onClick={() => setCurrentPage((p) => p + 1)}
+                      style={{
+                        padding: '0.5rem',
+                        borderRadius: 8,
+                        border: `1px solid ${currentPage === totalPages ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.1)'}`,
+                        background: 'transparent',
+                        color: currentPage === totalPages ? '#444' : '#F2F2F2',
+                        cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
+                        display: 'flex',
+                      }}
+                    >
+                      <ChevronRightIcon />
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
           </div>

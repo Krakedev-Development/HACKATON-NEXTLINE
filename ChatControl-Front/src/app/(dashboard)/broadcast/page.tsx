@@ -8,14 +8,11 @@ import {
   getMe,
   getBroadcastContacts,
   getBroadcastContactIds,
-  getBroadcastCampaignContactMap,
   getBroadcastTemplates,
   generateBroadcastMessage,
   getCrmBroadcastLists,
   previewBroadcastLists,
-  getCampaigns,
   getTags,
-  previewByTags,
   importExcelContacts,
   uploadBroadcastTemplateMedia,
   getBroadcastTemplateMedia,
@@ -27,7 +24,6 @@ import {
   type BroadcastTemplate,
   type BroadcastMessageType,
   type BroadcastListItem,
-  type Campaign,
   type ImportExcelContactsResult,
   type SettingsData,
   type BroadcastRun,
@@ -37,6 +33,7 @@ import {
 } from '@/lib/api';
 import { formatPhoneDisplay, humanizeTemplateName } from '@/lib/format';
 import { Spinner } from '@/shared/ui/spinner';
+import { FileDropzone } from '@/shared/ui/molecules/file-dropzone';
 import { useBroadcastProgress } from '@/widgets/broadcast-progress/BroadcastProgressProvider';
 
 const PAGE_SIZE = 50;
@@ -199,11 +196,10 @@ export default function BroadcastPage() {
   const [loadingList, setLoadingList] = useState(false);
   const [tags, setTags] = useState<Tag[]>([]);
   const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
-  const [tagPreview, setTagPreview] = useState<BroadcastListPreview | null>(null);
   const [loadingTags, setLoadingTags] = useState(false);
   const [tagSearch, setTagSearch] = useState('');
   const [tagVisibleCount, setTagVisibleCount] = useState(TAG_PAGE_SIZE);
-  const [excelPreviewRows, setExcelPreviewRows] = useState<Array<{ name: string; phone: string }>>([]);
+  const [excelPreviewRows, setExcelPreviewRows] = useState<Array<{ name: string; phone: string; tag: string }>>([]);
   const [excelFileName, setExcelFileName] = useState('');
   const [excelParsing, setExcelParsing] = useState(false);
   const [excelImporting, setExcelImporting] = useState(false);
@@ -242,18 +238,6 @@ export default function BroadcastPage() {
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [selectedCampaignIds, setSelectedCampaignIds] = useState<Set<string>>(new Set());
-  const [campaignContactMap, setCampaignContactMap] = useState<Record<string, string[]>>({});
-  const [loadingCampaigns, setLoadingCampaigns] = useState(false);
-  const [campaignSearch, setCampaignSearch] = useState('');
-
-  const filteredCampaigns = campaigns.filter(c =>
-    !campaignSearch.trim() ||
-    c.name.toLowerCase().includes(campaignSearch.toLowerCase()) ||
-    (c.description?.toLowerCase().includes(campaignSearch.toLowerCase()) ?? false)
-  );
 
   const loadCrmLists = useCallback(async () => {
     try {
@@ -317,11 +301,9 @@ export default function BroadcastPage() {
     const initialLists = searchParams?.get('lists');
     (async () => {
       setLoading(true);
-      setLoadingCampaigns(true);
       try {
-        const [tl, campaignsData, meData] = await Promise.all([getBroadcastTemplates(), getCampaigns(), getMe()]);
+        const [tl, meData] = await Promise.all([getBroadcastTemplates(), getMe()]);
         setTemplates(tl);
-        setCampaigns(campaignsData);
         setMe(meData);
         if (initialSource === 'crm' && meData.hasCrm) {
           setContactSource('crm_lists');
@@ -331,30 +313,24 @@ export default function BroadcastPage() {
         }
         await Promise.all([loadCrmLists(), loadTags()]);
         refreshDailyUsage();
-
-        if (campaignsData.length > 0) {
-          const allIds = campaignsData.map(c => c.id);
-          const res = await getBroadcastCampaignContactMap(allIds);
-          setCampaignContactMap(res.byCampaign);
-        }
-      } catch (err) {} finally { setLoading(false); setLoadingCampaigns(false); }
+      } catch (err) {} finally { setLoading(false); }
     })();
   }, [mounted, router, searchParams, loadCrmLists, loadTags, refreshDailyUsage]);
 
   const onlyCanSend = messageType !== 'template';
-  const campaignIdsKey = Array.from(selectedCampaignIds).sort().join(',');
 
-  async function loadFirstPage(q: string, campaignIds: string[]) {
+  async function loadFirstPage(q: string, tagIds?: string[], autoSelectAll?: boolean) {
     setLoading(true);
     try {
       const [page, ids] = await Promise.all([
-        getBroadcastContacts({ q, campaignIds, limit: PAGE_SIZE }),
-        getBroadcastContactIds({ q, campaignIds, onlyCanSend }),
+        getBroadcastContacts({ q, tagIds, limit: PAGE_SIZE }),
+        getBroadcastContactIds({ q, tagIds, onlyCanSend }),
       ]);
       setContacts(page.contacts);
       setNextCursor(page.nextCursor);
       setTotal(page.total);
       setMatchingIds(ids);
+      if (autoSelectAll) setSelectedIds(new Set(ids));
     } catch (err) {} finally { setLoading(false); }
   }
 
@@ -362,18 +338,32 @@ export default function BroadcastPage() {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
     try {
-      const page = await getBroadcastContacts({ q: debouncedQuery, campaignIds: Array.from(selectedCampaignIds), limit: PAGE_SIZE, cursor: nextCursor });
+      const tagIds = contactSource === 'tags' ? Array.from(selectedTagIds) : undefined;
+      const page = await getBroadcastContacts({ q: debouncedQuery, tagIds, limit: PAGE_SIZE, cursor: nextCursor });
       setContacts(prev => [...prev, ...page.contacts]);
       setNextCursor(page.nextCursor);
       setTotal(page.total);
     } catch (err) {} finally { setLoadingMore(false); }
   }
 
+  const tagIdsKey = Array.from(selectedTagIds).sort().join(',');
+
   useEffect(() => {
-    if (!mounted || !isLoggedIn() || contactSource !== 'manual') return;
-    loadFirstPage(debouncedQuery, Array.from(selectedCampaignIds));
+    if (!mounted || !isLoggedIn()) return;
+    if (contactSource === 'manual') {
+      loadFirstPage(debouncedQuery);
+    } else if (contactSource === 'tags') {
+      if (selectedTagIds.size === 0) {
+        setContacts([]);
+        setTotal(0);
+        setMatchingIds([]);
+        setNextCursor(null);
+        return;
+      }
+      loadFirstPage(debouncedQuery, Array.from(selectedTagIds), true);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mounted, debouncedQuery, contactSource, onlyCanSend, campaignIdsKey]);
+  }, [mounted, debouncedQuery, contactSource, onlyCanSend, tagIdsKey]);
 
   function handleContactListScroll(e: React.UIEvent<HTMLDivElement>) {
     const el = e.currentTarget;
@@ -500,31 +490,6 @@ export default function BroadcastPage() {
     }
   }, [contactSource, selectedListIds, refreshListPreview]);
 
-  const refreshTagPreview = useCallback(async (tagIds: string[]) => {
-    if (!tagIds.length) {
-      setTagPreview(null);
-      setSelectedIds(new Set());
-      return;
-    }
-    setLoadingList(true);
-    try {
-      const preview = await previewByTags(tagIds);
-      setTagPreview(preview);
-      setSelectedIds(new Set(preview.conversationIds));
-    } catch (err) {
-      console.error('Error loading tag preview', err);
-      setTagPreview(null);
-    } finally {
-      setLoadingList(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (contactSource === 'tags' && selectedTagIds.size > 0) {
-      refreshTagPreview(Array.from(selectedTagIds));
-    }
-  }, [contactSource, selectedTagIds, refreshTagPreview]);
-
   // Limpiar selección de contactos inactivos si se cambia a un mensaje que no es plantilla
   useEffect(() => {
     if (messageType !== 'template') {
@@ -617,9 +582,7 @@ export default function BroadcastPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [templateId]);
 
-  const handleHeaderFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleHeaderFile = async (file: File) => {
     setTemplateHeaderPreviewUrl(URL.createObjectURL(file));
     setTemplateHeaderUploading(true);
     setTemplateHeaderUploadError('');
@@ -632,7 +595,6 @@ export default function BroadcastPage() {
       setTemplateHeaderUploadError(err instanceof Error ? err.message : 'Error al subir el archivo.');
     } finally {
       setTemplateHeaderUploading(false);
-      e.target.value = '';
     }
   };
 
@@ -691,30 +653,11 @@ export default function BroadcastPage() {
     });
   };
 
-  const toggleCampaign = (campaignId: string) => {
-    const nextCampaigns = new Set(selectedCampaignIds);
-    const nextContacts = new Set(selectedIds);
-
-    if (nextCampaigns.has(campaignId)) {
-      nextCampaigns.delete(campaignId);
-      const toRemove = campaignContactMap[campaignId] || [];
-      for (const cid of toRemove) nextContacts.delete(cid);
-    } else {
-      nextCampaigns.add(campaignId);
-      const ids = campaignContactMap[campaignId] || [];
-      for (const cid of ids) nextContacts.add(cid);
-    }
-
-    setSelectedCampaignIds(nextCampaigns);
-    setSelectedIds(nextContacts);
-  };
-
   const handleSourceChange = (source: 'manual' | 'crm_lists' | 'tags' | 'excel_import') => {
     setContactSource(source);
     setSelectedListIds(new Set());
     setListPreview(null);
     setSelectedTagIds(new Set());
-    setTagPreview(null);
     setTagSearch('');
     setExcelPreviewRows([]);
     setExcelFileName('');
@@ -726,11 +669,26 @@ export default function BroadcastPage() {
   const handleDownloadExcelTemplate = async () => {
     const XLSX = await import('xlsx');
     const ws = XLSX.utils.aoa_to_sheet([
-      ['nombre', 'numero'],
-      ['Juan Pérez', '3001234567'],
-      ['María Gómez', '3109876543'],
+      ['nombre', 'etiqueta', 'numero'],
+      ['Juan Pérez', '', '3001234567'],
     ]);
-    ws['!cols'] = [{ wch: 25 }, { wch: 18 }];
+    ws['!cols'] = [{ wch: 25 }, { wch: 18 }, { wch: 18 }];
+
+    // Preformatea la columna "numero" como texto (incluso las filas vacías) para que Excel no
+    // convierta los números largos a notación científica (5.93968E+11) al escribirlos a mano.
+    const PHONE_COL = 2;
+    const PRESET_ROWS = 500;
+    for (let row = 0; row <= PRESET_ROWS; row++) {
+      const addr = XLSX.utils.encode_cell({ r: row, c: PHONE_COL });
+      if (ws[addr]) {
+        ws[addr].t = 's';
+        ws[addr].z = '@';
+      } else {
+        ws[addr] = { t: 's', v: '', z: '@' };
+      }
+    }
+    ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: PRESET_ROWS, c: 2 } });
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Contactos');
     XLSX.writeFile(wb, 'plantilla_contactos_masivos.xlsx');
@@ -749,14 +707,33 @@ export default function BroadcastPage() {
       const sheet = wb.Sheets[wb.SheetNames[0]];
       const rawRows: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
+      if (!rawRows.length) {
+        setExcelError('El archivo está vacío.');
+        setExcelPreviewRows([]);
+        return;
+      }
+
+      // Detecta las columnas por el texto del encabezado (nombre/etiqueta/numero), sin importar
+      // el orden en el que vengan en el archivo.
+      const headerRow = rawRows[0].map(v => String(v ?? '').trim().toLowerCase());
+      const findCol = (...keys: string[]) => headerRow.findIndex(h => keys.some(k => h.includes(k)));
+      const hasHeader = headerRow.some(h => ['nombre', 'etiqueta', 'numero', 'número', 'telefono', 'teléfono', 'whatsapp'].includes(h));
+
+      let colName = 0, colTag = 1, colPhone = 2;
       let dataRows = rawRows;
-      const firstRow = rawRows[0]?.map(v => String(v ?? '').trim().toLowerCase()) || [];
-      if (firstRow[0]?.includes('nombre') || firstRow[1]?.includes('numero') || firstRow[1]?.includes('número') || firstRow[1]?.includes('telefono')) {
+      if (hasHeader) {
+        colName = findCol('nombre');
+        colTag = findCol('etiqueta', 'tag');
+        colPhone = findCol('numero', 'número', 'telefono', 'teléfono', 'whatsapp');
         dataRows = rawRows.slice(1);
       }
 
       const rows = dataRows
-        .map(r => ({ name: String(r[0] ?? '').trim(), phone: String(r[1] ?? '').trim() }))
+        .map(r => ({
+          name: colName >= 0 ? String(r[colName] ?? '').trim() : '',
+          tag: colTag >= 0 ? String(r[colTag] ?? '').trim() : '',
+          phone: colPhone >= 0 ? String(r[colPhone] ?? '').trim() : '',
+        }))
         .filter(r => r.phone);
 
       if (!rows.length) {
@@ -801,6 +778,21 @@ export default function BroadcastPage() {
   const nextFreeAtLabel = dailyUsage?.nextFreeAt
     ? new Date(dailyUsage.nextFreeAt).toLocaleString('es-EC', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })
     : null;
+
+  // Etiquetas del Excel que no coinciden con ninguna del catálogo (se avisa antes de importar,
+  // no bloquea: esas filas simplemente quedan sin etiqueta si se confirma igual).
+  const knownTagNames = new Set(tags.map(t => t.name.trim().toUpperCase()));
+  const unmatchedExcelTagWarnings: Array<{ name: string; count: number }> = [];
+  if (excelPreviewRows.length > 0) {
+    const counts = new Map<string, number>();
+    for (const r of excelPreviewRows) {
+      const tagName = r.tag.trim();
+      if (!tagName) continue;
+      if (knownTagNames.has(tagName.toUpperCase())) continue;
+      counts.set(tagName, (counts.get(tagName) || 0) + 1);
+    }
+    for (const [name, count] of Array.from(counts.entries())) unmatchedExcelTagWarnings.push({ name, count });
+  }
 
   const forceMetaTemplate = contactSource === 'excel_import' && (excelImportResult?.outOfWindowCount ?? 0) > 0;
 
@@ -1078,30 +1070,33 @@ export default function BroadcastPage() {
                 <div style={{ maxHeight: 160, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }} onScroll={handleTagListScroll} className="custom-scrollbar">
                   {filteredTags.length === 0 ? (
                     <div style={{ padding: '1rem', textAlign: 'center', color: '#444', fontSize: '0.75rem' }}>Sin etiquetas</div>
-                  ) : visibleTags.map((t) => (
-                    <label
-                      key={t.id}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 8,
-                        padding: '0.5rem 0.75rem',
-                        borderRadius: 10,
-                        background: selectedTagIds.has(t.id) ? 'rgba(239,68,68,0.08)' : 'rgba(255,255,255,0.02)',
-                        border: `1px solid ${selectedTagIds.has(t.id) ? 'rgba(239,68,68,0.2)' : 'rgba(255,255,255,0.05)'}`,
-                        cursor: 'pointer',
-                        fontSize: '0.8rem',
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selectedTagIds.has(t.id)}
-                        onChange={() => toggleTagSelection(t.id)}
-                      />
-                      <span style={{ flex: 1 }}>{t.name}</span>
-                      <span style={{ color: '#666', fontSize: '0.7rem' }}>({t.contactCount})</span>
-                    </label>
-                  ))}
+                  ) : visibleTags.map((t) => {
+                    const isTagSelected = selectedTagIds.has(t.id);
+                    return (
+                      <div
+                        key={t.id}
+                        onClick={() => toggleTagSelection(t.id)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          padding: '0.5rem 0.75rem',
+                          borderRadius: 10,
+                          background: isTagSelected ? 'rgba(239,68,68,0.08)' : 'rgba(255,255,255,0.02)',
+                          border: `1px solid ${isTagSelected ? 'rgba(239,68,68,0.2)' : 'rgba(255,255,255,0.05)'}`,
+                          cursor: 'pointer',
+                          fontSize: '0.8rem',
+                          userSelect: 'none',
+                        }}
+                      >
+                        <div style={{ width: '16px', height: '16px', borderRadius: '4px', flexShrink: 0, border: `2px solid ${isTagSelected ? '#EF4444' : 'rgba(255,255,255,0.15)'}`, background: isTagSelected ? '#EF4444' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s ease' }}>
+                          {isTagSelected && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}
+                        </div>
+                        <span style={{ flex: 1, color: isTagSelected ? '#FFF' : '#AAA', fontWeight: 700 }}>{t.name}</span>
+                        <span style={{ color: '#666', fontSize: '0.7rem' }}>({t.contactCount})</span>
+                      </div>
+                    );
+                  })}
                   {visibleTags.length < filteredTags.length && (
                     <div style={{ padding: '0.4rem', textAlign: 'center', color: '#444', fontSize: '0.6rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                       Desplazate para ver más
@@ -1109,12 +1104,11 @@ export default function BroadcastPage() {
                   )}
                 </div>
               )}
-              {tagPreview && <AudiencePreviewPanel preview={tagPreview} />}
             </div>
           ) : contactSource === 'excel_import' ? (
             <div style={{ marginBottom: '0.75rem' }}>
               <div style={{ fontSize: '0.65rem', color: '#666', fontWeight: 700, marginBottom: 8, textTransform: 'uppercase' }}>
-                Excel con columnas &quot;nombre&quot; y &quot;numero&quot;
+                Excel con columnas &quot;nombre&quot;, &quot;etiqueta&quot; (opcional) y &quot;numero&quot;
               </div>
               <button
                 type="button"
@@ -1155,10 +1149,16 @@ export default function BroadcastPage() {
                   <div style={{ fontSize: '0.7rem', color: '#8C8C8C', marginBottom: 6 }}>
                     {excelImportResult ? `${excelPreviewRows.length} contactos importados` : `${excelPreviewRows.length} filas detectadas`}
                   </div>
-                  <div style={{ maxHeight: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4, marginBottom: excelImportResult ? 0 : 10 }}>
+                  <div style={{ display: 'flex', gap: 8, fontSize: '0.6rem', color: '#555', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '0 0.5rem', marginBottom: 4 }}>
+                    <span style={{ flex: 1 }}>Nombre</span>
+                    <span style={{ flex: 1 }}>Etiqueta</span>
+                    <span>Número</span>
+                  </div>
+                  <div style={{ maxHeight: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4, marginBottom: excelImportResult ? 0 : 10 }} className="custom-scrollbar">
                     {excelPreviewRows.map((r, i) => (
                       <div key={i} style={{ display: 'flex', gap: 8, fontSize: '0.72rem', color: '#AAA', padding: '0.3rem 0.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: 6 }}>
                         <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name || '(sin nombre)'}</span>
+                        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#666' }}>{r.tag || '—'}</span>
                         <span style={{ color: '#666' }}>{r.phone}</span>
                       </div>
                     ))}
@@ -1168,6 +1168,17 @@ export default function BroadcastPage() {
                       Este archivo tiene {excelPreviewRows.length} contactos pero hoy solo puedes enviarle a {dailyRemaining}. Reduce el archivo o repártelo en varios días para no ser bloqueado por WhatsApp.
                     </p>
                   )}
+                  {!excelImportResult && unmatchedExcelTagWarnings.length > 0 && (
+                    <div style={{ margin: '0 0 10px', padding: '0.65rem 0.75rem', background: 'rgba(245, 158, 11, 0.08)', border: '1px solid rgba(245, 158, 11, 0.25)', borderRadius: 10, fontSize: '0.7rem', color: '#F59E0B', lineHeight: 1.5 }}>
+                      <strong>{unmatchedExcelTagWarnings.length} etiqueta{unmatchedExcelTagWarnings.length > 1 ? 's' : ''} del archivo no {unmatchedExcelTagWarnings.length > 1 ? 'existen' : 'existe'}:</strong>
+                      <ul style={{ margin: '0.3rem 0 0', paddingLeft: '1rem', maxHeight: 80, overflowY: 'auto' }}>
+                        {unmatchedExcelTagWarnings.map(w => (
+                          <li key={w.name}>{w.name} ({w.count})</li>
+                        ))}
+                      </ul>
+                      <p style={{ margin: '0.4rem 0 0', color: '#C89B3C' }}>Si importás igual, esas filas quedan sin etiqueta.</p>
+                    </div>
+                  )}
                   {!excelImportResult && (
                     <button
                       type="button"
@@ -1176,7 +1187,7 @@ export default function BroadcastPage() {
                       style={{ width: '100%', padding: '0.65rem', background: excelExceedsCapacity ? 'rgba(239,68,68,0.3)' : '#EF4444', border: 'none', borderRadius: 10, color: 'white', fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', cursor: (excelImporting || excelExceedsCapacity) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
                     >
                       {excelImporting && <Spinner size={14} />}
-                      {excelImporting ? 'Importando...' : excelExceedsCapacity ? 'Límite diario superado' : 'Confirmar importación'}
+                      {excelImporting ? 'Importando...' : excelExceedsCapacity ? 'Límite diario superado' : unmatchedExcelTagWarnings.length > 0 ? 'Importar de todas formas' : 'Confirmar importación'}
                     </button>
                   )}
                 </div>
@@ -1198,6 +1209,7 @@ export default function BroadcastPage() {
                   <span>Creados: <strong style={{ color: '#22c55e' }}>{excelImportResult.created}</strong></span>
                   <span>Actualizados: <strong style={{ color: '#3b82f6' }}>{excelImportResult.updated}</strong></span>
                   <span>Rechazados: <strong style={{ color: '#ef4444' }}>{excelImportResult.rejected}</strong></span>
+                  <span>Etiquetas no encontradas: <strong style={{ color: '#f59e0b' }}>{excelImportResult.unmatchedTags}</strong></span>
                   <span>Fuera de ventana: <strong style={{ color: '#f59e0b' }}>{excelImportResult.outOfWindowCount}</strong></span>
                   <span style={{ gridColumn: '1 / -1' }}>Listos: <strong style={{ color: '#F2F2F2' }}>{selectedIds.size}</strong></span>
                   {excelImportResult.outOfWindowCount > 0 && (
@@ -1216,52 +1228,6 @@ export default function BroadcastPage() {
               >
                 {allMatchingSelected ? `Desmarcar todos (${total})` : `Seleccionar todos (${total})`}
               </button>
-
-              {!loadingCampaigns && campaigns.length > 0 && (
-                <div style={{ padding: '0.65rem 0.75rem', borderRadius: '10px', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)' }}>
-                  <p style={{ margin: '0 0 0.5rem', fontSize: '0.65rem', fontWeight: 800, color: '#555', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                    Filtrar por campaña
-                  </p>
-
-                  <div style={{ position: 'relative', marginBottom: '0.5rem' }}>
-                    <SearchIcon style={{ position: 'absolute', left: '0.5rem', top: '50%', transform: 'translateY(-50%)', color: '#444', width: '0.75rem', height: '0.75rem' }} />
-                    <input
-                      type="text"
-                      placeholder="Buscar campaña..."
-                      value={campaignSearch}
-                      onChange={(e) => setCampaignSearch(e.target.value)}
-                      style={{ width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '8px', padding: '0.4rem 0.5rem 0.4rem 1.6rem', color: 'white', outline: 'none', fontSize: '0.72rem', boxSizing: 'border-box' }}
-                    />
-                  </div>
-
-                  <div style={{ maxHeight: '220px', overflowY: 'auto' }}>
-                    {filteredCampaigns.length === 0 ? (
-                      <p style={{ fontSize: '0.7rem', color: '#555', padding: '0.5rem 0', textAlign: 'center' }}>
-                        {campaignSearch ? 'Sin resultados' : 'Sin campañas'}
-                      </p>
-                    ) : filteredCampaigns.map(c => {
-                      const isCampaignSelected = selectedCampaignIds.has(c.id);
-                      const contactCount = campaignContactMap[c.id]?.length || 0;
-                      return (
-                        <div
-                          key={c.id}
-                          onClick={() => toggleCampaign(c.id)}
-                          style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.4rem 0.25rem', borderRadius: '6px', cursor: 'pointer', userSelect: 'none', opacity: c.isActive ? 1 : 0.55 }}
-                        >
-                          <div style={{ width: '16px', height: '16px', borderRadius: '4px', flexShrink: 0, border: `2px solid ${isCampaignSelected ? '#EF4444' : 'rgba(255,255,255,0.15)'}`, background: isCampaignSelected ? '#EF4444' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s ease' }}>
-                            {isCampaignSelected && <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1.5 5l2.5 2.5 4.5-5" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
-                          </div>
-                          <span style={{ fontSize: '0.78rem', fontWeight: 700, color: isCampaignSelected ? '#FFF' : '#AAA', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {c.name}
-                          </span>
-                          <span style={{ fontSize: '0.6rem', color: '#555' }}>{contactCount}</span>
-                          {c.isActive && <span style={{ fontSize: '0.6rem', fontWeight: 800, color: '#4ADE80', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Activa</span>}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
             </>
           )}
         </div>
@@ -1282,9 +1248,9 @@ export default function BroadcastPage() {
             <div style={{ padding: '2rem', textAlign: 'center', color: '#22c55e', fontSize: '0.9rem', fontWeight: 700 }}>
               {selectedIds.size} contactos listos desde {selectedListIds.size} lista(s) CRM
             </div>
-          ) : contactSource === 'tags' && selectedTagIds.size > 0 ? (
-            <div style={{ padding: '2rem', textAlign: 'center', color: '#22c55e', fontSize: '0.9rem', fontWeight: 700 }}>
-              {selectedIds.size} contactos listos desde {selectedTagIds.size} etiqueta(s)
+          ) : contactSource === 'tags' && selectedTagIds.size === 0 ? (
+            <div style={{ padding: '2rem', textAlign: 'center', color: '#555', fontSize: '0.85rem' }}>
+              Selecciona una o varias etiquetas para ver sus contactos.
             </div>
           ) : contactSource === 'excel_import' ? (
             <div style={{ padding: '2rem', textAlign: 'center', color: excelImportResult ? '#22c55e' : '#555', fontSize: '0.9rem', fontWeight: 700 }}>
@@ -1423,18 +1389,20 @@ export default function BroadcastPage() {
           {/* Selector de Tipo de Mensaje */}
           <div style={{ background: '#080808', borderRadius: '20px', padding: '0.5rem', display: 'flex', gap: '0.5rem', marginBottom: forceMetaTemplate ? '0.75rem' : '2.5rem', border: '1px solid rgba(255,255,255,0.05)' }}>
             {(['manual', 'template', 'ia'] as BroadcastMessageType[])
-              .filter((type) => !forceMetaTemplate || type === 'template')
               .map((type) => {
+              const isLocked = forceMetaTemplate && type !== 'template';
               return (
                 <button
                   key={type}
-                  onClick={() => setMessageType(type)}
+                  onClick={() => !isLocked && setMessageType(type)}
+                  disabled={isLocked}
                   style={{
                     flex: 1, padding: '1rem', borderRadius: '16px', border: 'none',
                     background: messageType === type ? '#EF4444' : 'transparent',
-                    color: messageType === type ? 'white' : '#666',
+                    color: isLocked ? '#333' : messageType === type ? 'white' : '#666',
                     fontSize: '0.85rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em',
-                    cursor: 'pointer', transition: 'all 0.3s ease',
+                    cursor: isLocked ? 'not-allowed' : 'pointer', transition: 'all 0.3s ease',
+                    opacity: isLocked ? 0.4 : 1,
                     boxShadow: messageType === type ? '0 10px 20px rgba(239, 68, 68, 0.2)' : 'none'
                   }}
                 >
@@ -1628,34 +1596,36 @@ export default function BroadcastPage() {
                       />
                     ) : (
                       <>
-                        <input
-                          type="file"
+                        <FileDropzone
                           accept={
                             selectedTemplate.header.format === 'IMAGE' ? 'image/*'
                               : selectedTemplate.header.format === 'VIDEO' ? 'video/*'
                               : undefined
                           }
-                          onChange={handleHeaderFileChange}
+                          onFile={handleHeaderFile}
                           disabled={templateHeaderUploading}
-                          style={{ color: 'white', fontSize: '0.85rem' }}
+                          hint={selectedTemplate.header.format.toLowerCase()}
                         />
-                        {templateHeaderPreviewUrl && selectedTemplate.header.format === 'IMAGE' && (
-                          <Image
-                            src={templateHeaderPreviewUrl}
-                            alt="Vista previa del encabezado"
-                            width={220}
-                            height={220}
-                            unoptimized
-                            style={{ maxWidth: '220px', maxHeight: '220px', width: 'auto', height: 'auto', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)', objectFit: 'cover' }}
-                          />
-                        )}
-                        {templateHeaderPreviewUrl && selectedTemplate.header.format === 'VIDEO' && (
-                          // eslint-disable-next-line jsx-a11y/media-has-caption
-                          <video
-                            src={templateHeaderPreviewUrl}
-                            controls
-                            style={{ maxWidth: '260px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)' }}
-                          />
+                        {templateHeaderPreviewUrl && (selectedTemplate.header.format === 'IMAGE' || selectedTemplate.header.format === 'VIDEO') && (
+                          <div style={{ display: 'flex', justifyContent: 'center' }}>
+                            {selectedTemplate.header.format === 'IMAGE' ? (
+                              <Image
+                                src={templateHeaderPreviewUrl}
+                                alt="Vista previa del encabezado"
+                                width={220}
+                                height={220}
+                                unoptimized
+                                style={{ maxWidth: '220px', maxHeight: '220px', width: 'auto', height: 'auto', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)', objectFit: 'cover' }}
+                              />
+                            ) : (
+                              // eslint-disable-next-line jsx-a11y/media-has-caption
+                              <video
+                                src={templateHeaderPreviewUrl}
+                                controls
+                                style={{ maxWidth: '260px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)' }}
+                              />
+                            )}
+                          </div>
                         )}
                         {loadingSavedHeader && <p style={{ margin: 0, fontSize: '0.75rem', color: '#999' }}>Buscando archivo guardado...</p>}
                         {templateHeaderUploading && <p style={{ margin: 0, fontSize: '0.75rem', color: '#999' }}>Subiendo archivo...</p>}
@@ -1787,7 +1757,7 @@ export default function BroadcastPage() {
               </div>
 
               <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-                {RUN_REASON_FILTERS.map((f) => {
+                {RUN_REASON_FILTERS.filter((f) => f.category !== 'SANDBOX_BLOCKED' || me?.isSandbox).map((f) => {
                   const active = runContactsStatus === f.status && runContactsCategory === f.category;
                   return (
                     <button

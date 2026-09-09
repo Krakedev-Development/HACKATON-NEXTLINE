@@ -146,8 +146,41 @@ export class BroadcastService {
     return new Set(contacts.map((c) => c.id));
   }
 
-  /** Lista completa (sin paginar) de contactos de broadcast. Uso interno para envíos y validaciones. */
+  private async getTagContactIdSet(organizationId: string, tagIds?: string[]): Promise<Set<string> | null> {
+    if (!tagIds?.length) return null;
+    const contacts = await this.prisma.contact.findMany({
+      where: { organizationId, tagId: { in: tagIds } },
+      select: { id: true },
+    });
+    return new Set(contacts.map((c) => c.id));
+  }
+
+  /**
+   * Lista completa (sin paginar) de contactos de broadcast. Uso interno para envíos y validaciones.
+   * `getContacts`/`getAllContactIds` la llaman en paralelo (una vez para la página, otra para los
+   * ids totales) sobre la misma request de UI, y esta consulta recorre TODAS las conversaciones de
+   * la organización — cachear la promesa por unos segundos evita recalcularla dos veces seguidas.
+   */
+  private allContactsCache = new Map<string, { promise: Promise<BroadcastContact[]>; expiresAt: number }>();
+  private static readonly ALL_CONTACTS_CACHE_TTL_MS = 3000;
+
   async getAllContacts(organizationId: string, userId?: string, userRole?: string): Promise<BroadcastContact[]> {
+    const cacheKey = `${organizationId}:${userId ?? ''}:${userRole ?? ''}`;
+    const cached = this.allContactsCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.promise;
+    }
+
+    const promise = this.loadAllContacts(organizationId, userId, userRole);
+    this.allContactsCache.set(cacheKey, {
+      promise,
+      expiresAt: Date.now() + BroadcastService.ALL_CONTACTS_CACHE_TTL_MS,
+    });
+    promise.catch(() => this.allContactsCache.delete(cacheKey));
+    return promise;
+  }
+
+  private async loadAllContacts(organizationId: string, userId?: string, userRole?: string): Promise<BroadcastContact[]> {
     await this.ensureConversationsExist(organizationId);
     const list = await this.chat.getConversationsWithWindowStatus(organizationId, userId, userRole);
     return list.map((c) => ({
@@ -167,17 +200,19 @@ export class BroadcastService {
     organizationId: string,
     userId?: string,
     userRole?: string,
-    filter?: { q?: string; campaignIds?: string[] },
+    filter?: { q?: string; campaignIds?: string[]; tagIds?: string[] },
     cursor?: string,
     limit?: number,
   ): Promise<{ contacts: BroadcastContact[]; nextCursor: string | null; total: number }> {
-    const [list, campaignContactIds] = await Promise.all([
+    const [list, campaignContactIds, tagContactIds] = await Promise.all([
       this.getAllContacts(organizationId, userId, userRole),
       this.getCampaignContactIdSet(organizationId, filter?.campaignIds),
+      this.getTagContactIdSet(organizationId, filter?.tagIds),
     ]);
     const matching = list
       .filter((c) => this.matchesQuery(c, filter?.q))
-      .filter((c) => !campaignContactIds || campaignContactIds.has(c.contactId));
+      .filter((c) => !campaignContactIds || campaignContactIds.has(c.contactId))
+      .filter((c) => !tagContactIds || tagContactIds.has(c.contactId));
 
     const take = limit && limit > 0 ? Math.min(limit, 200) : 50;
     let startIndex = 0;
@@ -195,16 +230,18 @@ export class BroadcastService {
     organizationId: string,
     userId?: string,
     userRole?: string,
-    filter?: { q?: string; onlyCanSend?: boolean; campaignIds?: string[] },
+    filter?: { q?: string; onlyCanSend?: boolean; campaignIds?: string[]; tagIds?: string[] },
   ): Promise<string[]> {
-    const [list, campaignContactIds] = await Promise.all([
+    const [list, campaignContactIds, tagContactIds] = await Promise.all([
       this.getAllContacts(organizationId, userId, userRole),
       this.getCampaignContactIdSet(organizationId, filter?.campaignIds),
+      this.getTagContactIdSet(organizationId, filter?.tagIds),
     ]);
     return list
       .filter((c) => this.matchesQuery(c, filter?.q))
       .filter((c) => !filter?.onlyCanSend || c.canSend)
       .filter((c) => !campaignContactIds || campaignContactIds.has(c.contactId))
+      .filter((c) => !tagContactIds || tagContactIds.has(c.contactId))
       .map((c) => c.id);
   }
 

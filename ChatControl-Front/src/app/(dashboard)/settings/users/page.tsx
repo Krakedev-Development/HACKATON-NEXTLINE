@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Spinner } from '@/shared/ui/spinner';
+import { SelectPicker } from '@/shared/ui/molecules/select-picker';
 import { useRouter } from 'next/navigation';
 import {
   isLoggedIn,
@@ -480,13 +481,14 @@ export default function OrgUsersPage() {
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Nivel de Acceso</label>
-                <select 
-                  value={role} onChange={(e) => setRole(e.target.value as any)} 
-                  style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 12, padding: '0.85rem 1rem', color: 'white', outline: 'none', appearance: 'none', backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23EF4444' stroke-width='2.5'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 1rem center', backgroundSize: '1rem' }}
-                >
-                  <option value="AGENT" style={{ background: '#0d0d0d' }}>Agente (Solo Chat)</option>
-                  <option value="ORG_ADMIN" style={{ background: '#0d0d0d' }}>Administrador (Total)</option>
-                </select>
+                <SelectPicker
+                  value={role}
+                  onChange={(v) => setRole(v as 'AGENT' | 'ORG_ADMIN')}
+                  options={[
+                    { value: 'AGENT', label: 'Agente (Solo Chat)' },
+                    { value: 'ORG_ADMIN', label: 'Administrador (Total)' },
+                  ]}
+                />
               </div>
 
               {err && <div style={{ color: '#EF4444', fontSize: '0.8rem', textAlign: 'center', fontWeight: 700 }}>{err}</div>}
