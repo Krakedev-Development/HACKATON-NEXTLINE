@@ -107,6 +107,7 @@ export class BroadcastController {
       userId: user.userId,
       conversationIds: dto.conversationIds,
       type: dto.type,
+      title: dto.title,
       text: dto.text ?? '',
       templateId: dto.templateId,
       templateVariables: dto.templateVariables,
