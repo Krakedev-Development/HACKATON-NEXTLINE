@@ -546,14 +546,18 @@ export class BroadcastService {
     this.gateway.emitBroadcastCompleted(organizationId, { sent, failed, errors });
   }
 
-  /** Cuenta mensajes salientes marcados como FAILED (vía webhook de estado) en la ventana reciente,
-   * para frenar un envío masivo si Meta ya está rechazando por spam antes de quemar el resto de la lista. */
+  /** Cuenta mensajes salientes rechazados específicamente por límite de spam (código 131048/131049
+   * de Meta, vía webhook de estado) en la ventana reciente, para frenar un envío masivo si Meta ya
+   * está bloqueando por spam antes de quemar el resto de la lista. Solo cuenta esa categoría —no
+   * cualquier FAILED— para que una ráfaga de fallos por otra causa (ej. un archivo de media
+   * incompatible) no se frene y se etiquete como "spam" sin serlo. */
   private async recentSpamFailureCount(organizationId: string): Promise<number> {
     const since = new Date(Date.now() - CIRCUIT_BREAKER_WINDOW_MS);
     return this.prisma.message.count({
       where: {
         direction: MessageDirection.OUT,
         status: MessageStatus.FAILED,
+        errorCategory: 'SPAM_BLOCKED' satisfies BroadcastFailureCategory,
         whatsappTimestamp: { gte: since },
         conversation: { contact: { organizationId } },
       },
