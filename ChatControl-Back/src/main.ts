@@ -4,6 +4,16 @@ import { IoAdapter } from '@nestjs/platform-socket.io';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
+  // Sin esto, una excepción no controlada (o el proceso muriendo por OOM) no deja rastro en los
+  // logs — solo se ve que el servicio dejó de responder. Loguearlo antes de morir facilita
+  // diagnosticar la próxima vez.
+  process.on('unhandledRejection', (reason) => {
+    console.error('Unhandled promise rejection:', reason);
+  });
+  process.on('uncaughtException', (err) => {
+    console.error('Uncaught exception:', err);
+  });
+
   const app = await NestFactory.create(AppModule);
 
   // Prefijo global para todas las rutas
