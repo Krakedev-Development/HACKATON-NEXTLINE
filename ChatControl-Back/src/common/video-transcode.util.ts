@@ -24,7 +24,9 @@ export const WHATSAPP_VIDEO_MAX_BYTES = 16 * 1024 * 1024;
 const SIZE_SAFETY_MARGIN = 0.92;
 const AUDIO_BITRATE_BPS = 128_000;
 const MIN_VIDEO_BITRATE_BPS = 200_000;
-const MAX_BITRATE_ATTEMPTS = 3;
+// Cada intento corre un proceso ffmpeg completo; en instancias con poca RAM, encadenar varios
+// intentos seguidos suma memoria/CPU. 2 alcanza en la práctica gracias al cap de resolución.
+const MAX_BITRATE_ATTEMPTS = 2;
 const BITRATE_BACKOFF = 0.85;
 
 interface VideoProbeInfo {
@@ -55,7 +57,16 @@ function probeVideo(filePath: string): Promise<VideoProbeInfo> {
 function transcodeOnce(inputPath: string, outputPath: string, videoBitrateBps: number | null): Promise<void> {
   const TRANSCODE_TIMEOUT_MS = 120_000;
   return new Promise<void>((resolve, reject) => {
-    const outputOptions = ['-preset veryfast', '-pix_fmt yuv420p', '-movflags +faststart'];
+    const outputOptions = [
+      '-preset veryfast',
+      '-pix_fmt yuv420p',
+      '-movflags +faststart',
+      // Limita hilos y resolución para no disparar el uso de memoria/CPU de ffmpeg en instancias
+      // con poca RAM (ej. Render Starter): un video 4K/1080p de un celular puede hacer que ffmpeg
+      // por sí solo consuma varios cientos de MB al codificar, tirando abajo todo el proceso.
+      '-threads 2',
+      "-vf scale='min(1280,iw)':'min(1280,ih)':force_original_aspect_ratio=decrease",
+    ];
     if (videoBitrateBps) {
       const kbps = Math.floor(videoBitrateBps / 1000);
       outputOptions.push(`-b:v ${kbps}k`, `-maxrate ${kbps}k`, `-bufsize ${kbps * 2}k`);
