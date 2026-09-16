@@ -17,25 +17,80 @@ ffmpeg.setFfprobePath(ffprobeStatic.path);
 
 const logger = new Logger('VideoTranscode');
 
-function probeVideoCodec(filePath: string): Promise<string | null> {
+/** Límite real que impone la API de envío de WhatsApp Cloud para video (no confundir con el
+ * límite, más permisivo, que acepta la subida del archivo de ejemplo al aprobar una plantilla). */
+export const WHATSAPP_VIDEO_MAX_BYTES = 16 * 1024 * 1024;
+// Margen para el overhead del contenedor MP4 y la imprecisión del bitrate en un solo paso de codificación.
+const SIZE_SAFETY_MARGIN = 0.92;
+const AUDIO_BITRATE_BPS = 128_000;
+const MIN_VIDEO_BITRATE_BPS = 200_000;
+const MAX_BITRATE_ATTEMPTS = 3;
+const BITRATE_BACKOFF = 0.85;
+
+interface VideoProbeInfo {
+  codec: string | null;
+  durationSec: number | null;
+}
+
+function probeVideo(filePath: string): Promise<VideoProbeInfo> {
   return new Promise((resolve) => {
     ffmpeg.ffprobe(filePath, (err, data) => {
       if (err) {
         logger.warn(`No se pudo analizar el video: ${err.message}`);
-        resolve(null);
+        resolve({ codec: null, durationSec: null });
         return;
       }
       const videoStream = data.streams?.find((s) => s.codec_type === 'video');
-      resolve(videoStream?.codec_name ?? null);
+      const duration = Number(data.format?.duration);
+      resolve({
+        codec: videoStream?.codec_name ?? null,
+        durationSec: Number.isFinite(duration) && duration > 0 ? duration : null,
+      });
     });
   });
 }
 
+/** Codifica `inputPath` a H.264 en `outputPath`, apuntando a `videoBitrateBps` (o a un CRF fijo
+ * si no hay bitrate objetivo, ej. por no poder determinar la duración del video). */
+function transcodeOnce(inputPath: string, outputPath: string, videoBitrateBps: number | null): Promise<void> {
+  const TRANSCODE_TIMEOUT_MS = 120_000;
+  return new Promise<void>((resolve, reject) => {
+    const outputOptions = ['-preset veryfast', '-pix_fmt yuv420p', '-movflags +faststart'];
+    if (videoBitrateBps) {
+      const kbps = Math.floor(videoBitrateBps / 1000);
+      outputOptions.push(`-b:v ${kbps}k`, `-maxrate ${kbps}k`, `-bufsize ${kbps * 2}k`);
+    } else {
+      outputOptions.push('-crf 26');
+    }
+
+    const command = ffmpeg(inputPath)
+      .videoCodec('libx264')
+      .audioCodec('aac')
+      .audioBitrate(AUDIO_BITRATE_BPS / 1000)
+      .outputOptions(outputOptions)
+      .format('mp4')
+      .on('error', reject)
+      .on('end', () => resolve());
+
+    const timer = setTimeout(() => {
+      command.kill('SIGKILL');
+      reject(new Error(`Recodificación excedió ${TRANSCODE_TIMEOUT_MS / 1000}s`));
+    }, TRANSCODE_TIMEOUT_MS);
+
+    command.save(outputPath);
+    command.on('end', () => clearTimeout(timer));
+    command.on('error', () => clearTimeout(timer));
+  });
+}
+
 /**
- * WhatsApp Cloud API solo procesa video H.264 (AVC) + audio AAC en MP4.
- * Los videos HEVC/H.265 (comunes en iPhone) son aceptados al subir pero
- * rechazados después, de forma asíncrona (error 131053). Si el video no
- * viene en H.264, lo recodifica antes de enviarlo.
+ * WhatsApp Cloud API solo procesa video H.264 (AVC) + audio AAC en MP4, hasta 16MB por archivo
+ * al ENVIAR un mensaje (el límite es distinto y más permisivo al subir el ejemplo de una plantilla
+ * para aprobación — que Meta haya aceptado un archivo ahí no garantiza que pase al enviarlo).
+ * Los videos HEVC/H.265 (comunes en iPhone) son aceptados al subir pero rechazados después, de
+ * forma asíncrona (error 131053). Si el video no viene en H.264, o si pesa más de lo permitido,
+ * se recodifica antes de enviarlo, apuntando a un bitrate calculado según su duración para quedar
+ * bajo el límite de tamaño.
  */
 export async function ensureWhatsAppCompatibleVideo(
   buffer: Buffer,
@@ -50,37 +105,49 @@ export async function ensureWhatsAppCompatibleVideo(
 
   try {
     await fs.writeFile(inputPath, buffer);
-    const codec = await probeVideoCodec(inputPath);
-    if (codec === 'h264') {
+    const { codec, durationSec } = await probeVideo(inputPath);
+    const needsCodecFix = codec !== 'h264';
+    const needsSizeFix = buffer.length > WHATSAPP_VIDEO_MAX_BYTES;
+
+    if (!needsCodecFix && !needsSizeFix) {
       return { buffer, mimetype, transcoded: false };
     }
 
-    logger.log(`Recodificando video de códec "${codec ?? 'desconocido'}" a H.264 para compatibilidad con WhatsApp`);
+    logger.log(
+      `Recodificando video (códec="${codec ?? 'desconocido'}", ${(buffer.length / 1024 / 1024).toFixed(1)}MB) ` +
+        `para compatibilidad/tamaño con WhatsApp`,
+    );
 
-    const TRANSCODE_TIMEOUT_MS = 120_000;
-    await new Promise<void>((resolve, reject) => {
-      const command = ffmpeg(inputPath)
-        .videoCodec('libx264')
-        .audioCodec('aac')
-        // "veryfast" prioriza velocidad sobre tamaño: evita que un video largo
-        // deje la subida colgada; el tamaño sigue acotado por -crf.
-        .outputOptions(['-preset veryfast', '-crf 26', '-pix_fmt yuv420p', '-movflags +faststart'])
-        .format('mp4')
-        .on('error', reject)
-        .on('end', () => resolve());
+    let targetVideoBitrateBps =
+      durationSec != null
+        ? Math.max(
+            MIN_VIDEO_BITRATE_BPS,
+            Math.floor((WHATSAPP_VIDEO_MAX_BYTES * SIZE_SAFETY_MARGIN * 8) / durationSec) - AUDIO_BITRATE_BPS,
+          )
+        : null;
 
-      const timer = setTimeout(() => {
-        command.kill('SIGKILL');
-        reject(new Error(`Recodificación excedió ${TRANSCODE_TIMEOUT_MS / 1000}s`));
-      }, TRANSCODE_TIMEOUT_MS);
+    // Un solo paso de codificación con bitrate promedio puede pasarse del tamaño objetivo por
+    // variación de contenido; si el resultado sigue superando el límite, se reintenta con un
+    // bitrate menor hasta lograrlo o agotar los intentos.
+    let transcodedBuffer: Buffer | null = null;
+    for (let attempt = 1; attempt <= MAX_BITRATE_ATTEMPTS; attempt++) {
+      await transcodeOnce(inputPath, outputPath, targetVideoBitrateBps);
+      const result = await fs.readFile(outputPath);
 
-      command.save(outputPath);
-      command.on('end', () => clearTimeout(timer));
-      command.on('error', () => clearTimeout(timer));
-    });
+      if (result.length <= WHATSAPP_VIDEO_MAX_BYTES || !targetVideoBitrateBps) {
+        transcodedBuffer = result;
+        break;
+      }
 
-    const transcodedBuffer = await fs.readFile(outputPath);
-    return { buffer: transcodedBuffer, mimetype: 'video/mp4', transcoded: true };
+      logger.warn(
+        `Recodificación intento ${attempt} dio ${(result.length / 1024 / 1024).toFixed(1)}MB, ` +
+          `por encima del límite; bajando bitrate y reintentando`,
+      );
+      targetVideoBitrateBps = Math.max(MIN_VIDEO_BITRATE_BPS, Math.floor(targetVideoBitrateBps * BITRATE_BACKOFF));
+      transcodedBuffer = result;
+    }
+
+    return { buffer: transcodedBuffer!, mimetype: 'video/mp4', transcoded: true };
   } catch (err) {
     logger.error(`Fallo al recodificar el video, se enviará el original: ${err instanceof Error ? err.message : err}`);
     return { buffer, mimetype, transcoded: false };

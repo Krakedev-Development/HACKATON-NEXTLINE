@@ -73,8 +73,12 @@ export class BroadcastController {
     return this.broadcast.getTemplates(user.organizationId!);
   }
 
+  // 100MB: el techo real de WhatsApp es 16MB para video/audio y 5MB para imagen, pero eso se
+  // valida/aplica después (ensureWhatsAppCompatibleVideo comprime el video a ese límite). Este
+  // límite de entrada solo evita subir el archivo original antes de comprimir, así que debe ser
+  // generoso — igualando el límite más alto que WhatsApp permite (documentos, 100MB).
   @Post('template-media')
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 16 * 1024 * 1024 } }))
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 100 * 1024 * 1024 } }))
   async uploadTemplateMedia(
     @CurrentUser() user: AuthUser,
     @UploadedFile() file: any,

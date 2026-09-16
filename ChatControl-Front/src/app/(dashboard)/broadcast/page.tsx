@@ -228,6 +228,11 @@ export default function BroadcastPage() {
   const [templateHeaderUploadError, setTemplateHeaderUploadError] = useState('');
   const [usingSavedHeader, setUsingSavedHeader] = useState(false);
   const [loadingSavedHeader, setLoadingSavedHeader] = useState(false);
+  // Nombre del archivo actualmente confirmado en el servidor (el que templateHeaderValue apunta).
+  // Si una subida nueva falla, se usa para revertir el preview: templateHeaderValue nunca se
+  // toca en el catch, así que el envío real sigue usando este archivo aunque el preview mostrara
+  // por un instante el archivo nuevo que en realidad no se guardó.
+  const [savedHeaderFileName, setSavedHeaderFileName] = useState('');
   const [templateButtonVars, setTemplateButtonVars] = useState<Record<string, string>>({});
   const [instruction, setInstruction] = useState('');
   const [generatedText, setGeneratedText] = useState('');
@@ -564,6 +569,7 @@ export default function BroadcastPage() {
     setTemplateHeaderPreviewUrl('');
     setTemplateHeaderUploadError('');
     setUsingSavedHeader(false);
+    setSavedHeaderFileName('');
 
     const template = templates.find(t => t.id === templateId);
     if (!template?.header || template.header.format === 'TEXT') return;
@@ -576,6 +582,7 @@ export default function BroadcastPage() {
         setTemplateHeaderPreviewUrl(saved.mediaUrl);
         setTemplateHeaderFileName(saved.fileName || 'Archivo guardado');
         setUsingSavedHeader(true);
+        setSavedHeaderFileName(saved.fileName || 'Archivo guardado');
       })
       .catch(() => {})
       .finally(() => setLoadingSavedHeader(false));
@@ -584,15 +591,27 @@ export default function BroadcastPage() {
 
   const handleHeaderFile = async (file: File) => {
     setTemplateHeaderPreviewUrl(URL.createObjectURL(file));
+    setTemplateHeaderFileName(file.name);
+    setUsingSavedHeader(false);
     setTemplateHeaderUploading(true);
     setTemplateHeaderUploadError('');
-    setUsingSavedHeader(false);
     try {
       const { url } = await uploadBroadcastTemplateMedia(file, selectedTemplate?.id);
       setTemplateHeaderValue(url);
-      setTemplateHeaderFileName(file.name);
+      setSavedHeaderFileName(file.name);
     } catch (err) {
-      setTemplateHeaderUploadError(err instanceof Error ? err.message : 'Error al subir el archivo.');
+      // La subida falló: templateHeaderValue (lo que realmente se envía) sigue apuntando al
+      // archivo guardado anterior, o vacío si nunca hubo uno. Revertimos el preview para que
+      // coincida con lo que de verdad se va a enviar, en vez de mostrar el archivo rechazado.
+      setTemplateHeaderPreviewUrl(templateHeaderValue);
+      setTemplateHeaderFileName(templateHeaderValue ? savedHeaderFileName : '');
+      setUsingSavedHeader(!!templateHeaderValue);
+      const reason = err instanceof Error ? err.message : 'Error al subir el archivo.';
+      setTemplateHeaderUploadError(
+        templateHeaderValue
+          ? `${reason} Se mantiene el archivo guardado anterior (${savedHeaderFileName}) — el envío usará ese, no el que acabás de elegir.`
+          : `${reason} No hay ningún archivo guardado: no vas a poder enviar hasta subir uno válido.`,
+      );
     } finally {
       setTemplateHeaderUploading(false);
     }
@@ -1635,7 +1654,10 @@ export default function BroadcastPage() {
                           </p>
                         )}
                         {templateHeaderUploadError && (
-                          <p style={{ margin: 0, fontSize: '0.75rem', color: '#EF4444' }}>{templateHeaderUploadError}</p>
+                          <div style={{ padding: '0.75rem 1rem', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: '12px', display: 'flex', alignItems: 'flex-start', gap: '0.6rem' }}>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: '0.1rem' }}><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+                            <p style={{ margin: 0, fontSize: '0.8rem', color: '#EF4444', fontWeight: 700, lineHeight: 1.5 }}>{templateHeaderUploadError}</p>
+                          </div>
                         )}
                       </>
                     )}

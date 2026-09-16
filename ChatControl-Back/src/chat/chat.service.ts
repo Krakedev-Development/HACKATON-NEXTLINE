@@ -10,7 +10,7 @@ import { ChatGateway } from './chat.gateway';
 import { LeadAssignmentService } from '../lead-assignment/lead-assignment.service';
 import { StorageService } from '../common/storage.service';
 import { normalizePhone } from '../common/phone.util';
-import { ensureWhatsAppCompatibleVideo, withMp4Extension } from '../common/video-transcode.util';
+import { ensureWhatsAppCompatibleVideo, withMp4Extension, WHATSAPP_VIDEO_MAX_BYTES } from '../common/video-transcode.util';
 import { ConversationsQueryService } from './conversations-query.service';
 
 export interface Message {
@@ -629,6 +629,12 @@ export class ChatService {
       params.file.buffer,
       params.file.mimetype,
     );
+    if (mimetype.startsWith('video/') && buffer.length > WHATSAPP_VIDEO_MAX_BYTES) {
+      throw new BadRequestException(
+        `El video pesa ${(buffer.length / 1024 / 1024).toFixed(1)}MB incluso tras comprimirlo; ` +
+          'WhatsApp no permite enviar videos de más de 16MB. Probá con un archivo más corto o de menor resolución.',
+      );
+    }
     const fileName = transcoded ? withMp4Extension(params.file.originalname) : params.file.originalname;
 
     const timestamp = Date.now();
