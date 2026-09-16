@@ -55,6 +55,11 @@ export default function TemplatesPage() {
   const [headerUploadError, setHeaderUploadError] = useState('');
   const [usingSavedHeader, setUsingSavedHeader] = useState(false);
   const [loadingSavedHeader, setLoadingSavedHeader] = useState(false);
+  // Último archivo confirmado por el servidor: si una subida nueva falla (ej. supera el límite
+  // de tamaño), se usa para revertir el preview en vez de dejar mostrado un archivo que en
+  // realidad nunca se guardó.
+  const [savedHeaderUrl, setSavedHeaderUrl] = useState('');
+  const [savedHeaderFileName, setSavedHeaderFileName] = useState('');
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -111,6 +116,8 @@ export default function TemplatesPage() {
     setHeaderFileName('');
     setHeaderUploadError('');
     setUsingSavedHeader(false);
+    setSavedHeaderUrl('');
+    setSavedHeaderFileName('');
 
     if (!selectedTemplate?.header || selectedTemplate.header.format === 'TEXT') return;
 
@@ -121,6 +128,8 @@ export default function TemplatesPage() {
         setHeaderPreviewUrl(saved.mediaUrl);
         setHeaderFileName(saved.fileName || 'Archivo guardado');
         setUsingSavedHeader(true);
+        setSavedHeaderUrl(saved.mediaUrl);
+        setSavedHeaderFileName(saved.fileName || 'Archivo guardado');
       })
       .catch(() => {})
       .finally(() => setLoadingSavedHeader(false));
@@ -129,15 +138,28 @@ export default function TemplatesPage() {
 
   const handleHeaderFile = async (file: File) => {
     if (!selectedTemplate) return;
-    setHeaderPreviewUrl(URL.createObjectURL(file));
+    const localPreviewUrl = URL.createObjectURL(file);
+    setHeaderPreviewUrl(localPreviewUrl);
+    setHeaderFileName(file.name);
+    setUsingSavedHeader(false);
     setHeaderUploading(true);
     setHeaderUploadError('');
-    setUsingSavedHeader(false);
     try {
       await uploadBroadcastTemplateMedia(file, selectedTemplate.id);
-      setHeaderFileName(file.name);
+      setSavedHeaderUrl(localPreviewUrl);
+      setSavedHeaderFileName(file.name);
     } catch (err) {
-      setHeaderUploadError(err instanceof Error ? err.message : 'Error al subir el archivo.');
+      // La subida falló: el servidor sigue usando el archivo guardado anterior (o ninguno).
+      // Revertimos el preview para no mostrar un archivo que en realidad nunca se guardó.
+      setHeaderPreviewUrl(savedHeaderUrl);
+      setHeaderFileName(savedHeaderFileName);
+      setUsingSavedHeader(!!savedHeaderUrl);
+      const reason = err instanceof Error ? err.message : 'Error al subir el archivo.';
+      setHeaderUploadError(
+        savedHeaderUrl
+          ? `${reason} Se mantiene el archivo guardado anterior (${savedHeaderFileName}).`
+          : `${reason} No hay ningún archivo guardado para esta plantilla.`,
+      );
     } finally {
       setHeaderUploading(false);
     }
@@ -351,7 +373,10 @@ export default function TemplatesPage() {
                       </p>
                     )}
                     {headerUploadError && (
-                      <p style={{ margin: 0, fontSize: '0.75rem', color: '#EF4444' }}>{headerUploadError}</p>
+                      <div style={{ padding: '0.75rem 1rem', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: '12px', display: 'flex', alignItems: 'flex-start', gap: '0.6rem' }}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: '0.1rem' }}><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+                        <p style={{ margin: 0, fontSize: '0.8rem', color: '#EF4444', fontWeight: 700, lineHeight: 1.5 }}>{headerUploadError}</p>
+                      </div>
                     )}
                   </div>
                 </div>
