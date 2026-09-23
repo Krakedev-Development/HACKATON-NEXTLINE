@@ -21,6 +21,10 @@ export interface MetaTemplateButton {
   index: number;
   type: string;
   text: string;
+  url?: string;
+  phoneNumber?: string;
+  /** True si es un botón URL con variable ({{1}}) y hay que mandar el parámetro al enviar. */
+  dynamic?: boolean;
 }
 
 export interface MetaTemplateDto {
@@ -208,13 +212,14 @@ export class WhatsAppService {
       let buttons: MetaTemplateButton[] | undefined;
       const buttonsComp = t.components?.find((c) => c.type === 'BUTTONS');
       if (buttonsComp?.buttons?.length) {
-        const dynamic: MetaTemplateButton[] = [];
-        buttonsComp.buttons.forEach((b, index) => {
-          if (b.type === 'URL' && b.url && /\{\{\s*[a-zA-Z0-9_]+\s*\}\}/.test(b.url)) {
-            dynamic.push({ index, type: b.type, text: b.text });
-          }
-        });
-        if (dynamic.length) buttons = dynamic;
+        buttons = buttonsComp.buttons.map((b, index) => ({
+          index,
+          type: b.type,
+          text: b.text,
+          url: b.url,
+          phoneNumber: b.phone_number,
+          dynamic: b.type === 'URL' && !!b.url && /\{\{\s*[a-zA-Z0-9_]+\s*\}\}/.test(b.url),
+        }));
       }
 
       out.push({

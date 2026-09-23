@@ -282,6 +282,9 @@ export interface BroadcastTemplateButton {
   index: number;
   type: string;
   text: string;
+  url?: string;
+  phoneNumber?: string;
+  dynamic?: boolean;
 }
 
 export interface BroadcastTemplate {
@@ -486,6 +489,7 @@ export interface TemplateItem {
   updatedAt?: number;
   language?: string;
   header?: BroadcastTemplateHeader;
+  buttons?: BroadcastTemplateButton[];
 }
 
 /** Plantillas aprobadas de la cuenta WhatsApp Business (Meta). Mismo formato que TemplateItem. */

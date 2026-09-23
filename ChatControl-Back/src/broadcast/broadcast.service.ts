@@ -48,7 +48,7 @@ export interface BroadcastTemplate {
   body: string;
   variables: string[];
   header?: { format: 'TEXT' | 'IMAGE' | 'VIDEO' | 'DOCUMENT'; variables: string[] };
-  buttons?: Array<{ index: number; type: string; text: string }>;
+  buttons?: Array<{ index: number; type: string; text: string; url?: string; phoneNumber?: string; dynamic?: boolean }>;
 }
 
 interface SendBroadcastParams {
@@ -663,6 +663,9 @@ export class BroadcastService {
 
     if (metaT.buttons?.length) {
       for (const btn of metaT.buttons) {
+        // Solo los URL dinámicos requieren parámetro. Quick reply, URL fija y teléfono
+        // los agrega Meta solo con el nombre de la plantilla.
+        if (!btn.dynamic) continue;
         components.push({
           type: 'button',
           sub_type: 'url',

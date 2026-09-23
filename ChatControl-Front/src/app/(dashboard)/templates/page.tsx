@@ -13,6 +13,7 @@ import {
 } from '@/lib/api';
 import { humanizeTemplateName } from '@/lib/format';
 import { FileDropzone } from '@/shared/ui/molecules/file-dropzone';
+import { TemplateButtonsPreview } from '@/shared/ui/molecules/template-buttons-preview';
 
 // --- Icons ---
 function TemplateIcon({ style }: { style?: React.CSSProperties }) {
@@ -259,6 +260,11 @@ export default function TemplatesPage() {
                         Sin Multimedia
                       </div>
                     )}
+                    {selectedTemplate.buttons && selectedTemplate.buttons.length > 0 && (
+                      <div style={{ padding: '0.2rem 0.6rem', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: '6px', color: '#EF4444', fontSize: '0.65rem', fontWeight: 900, textTransform: 'uppercase' }}>
+                        {selectedTemplate.buttons.length} botón{selectedTemplate.buttons.length === 1 ? '' : 'es'}
+                      </div>
+                    )}
                   </div>
                   <p style={{ color: '#666', fontSize: '0.95rem' }}>Estructura oficial sincronizada directamente desde el Business Manager de Meta.</p>
                 </div>
@@ -288,6 +294,9 @@ export default function TemplatesPage() {
                   color: '#F2F2F2', fontSize: '1.1rem', lineHeight: '1.8', whiteSpace: 'pre-wrap', fontFamily: 'inherit'
                 }}>
                   {renderBodyWithHighlights(selectedTemplate.body)}
+                  {selectedTemplate.buttons && selectedTemplate.buttons.length > 0 && (
+                    <TemplateButtonsPreview buttons={selectedTemplate.buttons} />
+                  )}
                 </div>
                 <div style={{ marginTop: '1.5rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
                   {selectedTemplate.variables.map(v => (
