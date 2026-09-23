@@ -19,6 +19,8 @@ import {
   getSettings,
   getBroadcastRuns,
   getBroadcastRunContacts,
+  assignTagToBroadcastRun,
+  createTag,
   type BroadcastListPreview,
   type BroadcastContact,
   type BroadcastTemplate,
@@ -30,10 +32,12 @@ import {
   type BroadcastRunContact,
   type MeResponse,
   type Tag,
+  type AssignRunTagResult,
 } from '@/lib/api';
 import { formatPhoneDisplay, humanizeTemplateName } from '@/lib/format';
 import { Spinner } from '@/shared/ui/spinner';
 import { FileDropzone } from '@/shared/ui/molecules/file-dropzone';
+import { TagPicker } from '@/shared/ui/molecules/tag-picker';
 import { useBroadcastProgress } from '@/widgets/broadcast-progress/BroadcastProgressProvider';
 
 const PAGE_SIZE = 50;
@@ -389,20 +393,42 @@ export default function BroadcastPage() {
   const [runContactsStatus, setRunContactsStatus] = useState<'sent' | 'failed' | undefined>(undefined);
   const [runContactsCategory, setRunContactsCategory] = useState<string | undefined>(undefined);
   const [exportingRun, setExportingRun] = useState(false);
+  const [auditTagPanelOpen, setAuditTagPanelOpen] = useState(false);
+  const [auditTagId, setAuditTagId] = useState<string | null>(null);
+  const [auditTagOnlySent, setAuditTagOnlySent] = useState(false);
+  const [assigningTag, setAssigningTag] = useState(false);
+  const [assignTagError, setAssignTagError] = useState('');
+  const [assignTagResult, setAssignTagResult] = useState<AssignRunTagResult | null>(null);
+  const [newAuditTagName, setNewAuditTagName] = useState('');
+  const [creatingAuditTag, setCreatingAuditTag] = useState(false);
 
   const selectedRun = auditRuns.find(r => r.runId === selectedRunId) || null;
+
+  const resetAuditTagPanel = () => {
+    setAuditTagPanelOpen(false);
+    setAuditTagId(null);
+    setAuditTagOnlySent(false);
+    setAssigningTag(false);
+    setAssignTagError('');
+    setAssignTagResult(null);
+    setNewAuditTagName('');
+    setCreatingAuditTag(false);
+  };
 
   const openAudit = () => {
     setViewMode('audit');
     setSelectedRunId(null);
     setRunContacts([]);
+    resetAuditTagPanel();
     setLoadingRuns(true);
     getBroadcastRuns().then(setAuditRuns).catch(() => setAuditRuns([])).finally(() => setLoadingRuns(false));
+    if (tags.length === 0) loadTags();
   };
 
   const closeAudit = () => {
     setViewMode('compose');
     setSelectedRunId(null);
+    resetAuditTagPanel();
   };
 
   const loadRunContacts = useCallback((runId: string, status?: 'sent' | 'failed', category?: string) => {
@@ -433,6 +459,7 @@ export default function BroadcastPage() {
     setSelectedRunId(runId);
     setRunContactsStatus(undefined);
     setRunContactsCategory(undefined);
+    resetAuditTagPanel();
     loadRunContacts(runId, undefined, undefined);
   };
 
@@ -467,6 +494,42 @@ export default function BroadcastPage() {
       XLSX.writeFile(wb, `masivo_${safeName}.xlsx`);
     } finally {
       setExportingRun(false);
+    }
+  };
+
+  const handleCreateAuditTag = async () => {
+    const name = newAuditTagName.trim();
+    if (!name || creatingAuditTag) return;
+    setCreatingAuditTag(true);
+    setAssignTagError('');
+    try {
+      const created = await createTag({ name });
+      setTags((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+      setAuditTagId(created.id);
+      setNewAuditTagName('');
+    } catch (err) {
+      setAssignTagError(err instanceof Error ? err.message : 'No se pudo crear la etiqueta');
+    } finally {
+      setCreatingAuditTag(false);
+    }
+  };
+
+  const handleAssignRunTag = async () => {
+    if (!selectedRunId || !auditTagId || assigningTag) return;
+    setAssigningTag(true);
+    setAssignTagError('');
+    setAssignTagResult(null);
+    try {
+      const result = await assignTagToBroadcastRun(selectedRunId, {
+        tagId: auditTagId,
+        onlySent: auditTagOnlySent,
+      });
+      setAssignTagResult(result);
+      loadTags();
+    } catch (err) {
+      setAssignTagError(err instanceof Error ? err.message : 'No se pudo asignar la etiqueta');
+    } finally {
+      setAssigningTag(false);
     }
   };
 
@@ -1768,7 +1831,28 @@ export default function BroadcastPage() {
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <button
+                  onClick={() => {
+                    setAuditTagPanelOpen((open) => !open);
+                    setAssignTagError('');
+                    setAssignTagResult(null);
+                  }}
+                  style={{
+                    background: auditTagPanelOpen ? 'rgba(239, 68, 68, 0.12)' : 'rgba(255,255,255,0.03)',
+                    border: auditTagPanelOpen ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid rgba(255,255,255,0.08)',
+                    color: auditTagPanelOpen ? '#EF4444' : '#8C8C8C',
+                    padding: '0.6rem 1.1rem',
+                    borderRadius: 10,
+                    fontSize: '0.7rem',
+                    fontWeight: 800,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Asignar etiqueta
+                </button>
                 <button
                   onClick={handleExportRun}
                   disabled={exportingRun || runContacts.length === 0}
@@ -1777,6 +1861,157 @@ export default function BroadcastPage() {
                   {exportingRun ? 'Exportando...' : 'Exportar Excel'}
                 </button>
               </div>
+
+              {auditTagPanelOpen && (
+                <div style={{
+                  background: 'rgba(255,255,255,0.02)',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  borderRadius: 16,
+                  padding: '1.25rem 1.35rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.9rem',
+                }}>
+                  <div>
+                    <div style={{ fontSize: '0.8rem', fontWeight: 800, color: '#F2F2F2', marginBottom: '0.35rem' }}>
+                      Etiqueta de este masivo
+                    </div>
+                    <p style={{ margin: 0, fontSize: '0.75rem', color: '#8C8C8C', lineHeight: 1.5 }}>
+                      Se vincula a los contactos de este envío. Si un contacto ya tenía otra etiqueta, se reemplaza.
+                    </p>
+                  </div>
+
+                  <TagPicker
+                    tags={tags}
+                    value={auditTagId}
+                    onChange={(id) => {
+                      setAuditTagId(id);
+                      setAssignTagResult(null);
+                      setAssignTagError('');
+                    }}
+                    placeholder="Seleccionar etiqueta..."
+                  />
+
+                  {me?.role === 'ORG_ADMIN' && (
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <input
+                        type="text"
+                        value={newAuditTagName}
+                        onChange={(e) => setNewAuditTagName(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleCreateAuditTag(); } }}
+                        placeholder="O crear una etiqueta nueva..."
+                        maxLength={80}
+                        style={{
+                          flex: 1,
+                          minWidth: 180,
+                          background: 'rgba(255,255,255,0.03)',
+                          border: '1px solid rgba(255,255,255,0.08)',
+                          borderRadius: 10,
+                          padding: '0.7rem 0.85rem',
+                          color: 'white',
+                          outline: 'none',
+                          fontSize: '0.85rem',
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleCreateAuditTag}
+                        disabled={!newAuditTagName.trim() || creatingAuditTag}
+                        style={{
+                          padding: '0.7rem 1rem',
+                          borderRadius: 10,
+                          border: '1px solid rgba(255,255,255,0.08)',
+                          background: 'rgba(255,255,255,0.03)',
+                          color: !newAuditTagName.trim() ? '#444' : '#F2F2F2',
+                          fontSize: '0.7rem',
+                          fontWeight: 800,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.04em',
+                          cursor: !newAuditTagName.trim() || creatingAuditTag ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        {creatingAuditTag ? 'Creando...' : 'Crear'}
+                      </button>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setAuditTagOnlySent((prev) => !prev)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      width: '100%',
+                      textAlign: 'left',
+                      padding: '0.75rem 0.9rem',
+                      borderRadius: 12,
+                      background: auditTagOnlySent ? 'rgba(239, 68, 68, 0.08)' : 'rgba(255,255,255,0.02)',
+                      border: auditTagOnlySent ? '1px solid rgba(239, 68, 68, 0.2)' : '1px solid rgba(255,255,255,0.06)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <div style={{
+                      width: 18,
+                      height: 18,
+                      flexShrink: 0,
+                      borderRadius: 5,
+                      border: '2px solid',
+                      borderColor: auditTagOnlySent ? '#EF4444' : '#333',
+                      background: auditTagOnlySent ? '#EF4444' : 'transparent',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'all 0.2s',
+                    }}>
+                      {auditTagOnlySent && (
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                      )}
+                    </div>
+                    <span style={{ fontSize: '0.75rem', color: auditTagOnlySent ? '#F2F2F2' : '#8C8C8C', fontWeight: 600, lineHeight: 1.4 }}>
+                      Solo contactos enviados ({selectedRun?.sent ?? 0}), no incluir fallidos
+                    </span>
+                  </button>
+
+                  {assignTagError && (
+                    <p style={{ margin: 0, fontSize: '0.75rem', color: '#EF4444', fontWeight: 600 }}>{assignTagError}</p>
+                  )}
+                  {assignTagResult && (
+                    <p style={{ margin: 0, fontSize: '0.75rem', color: '#4ADE80', fontWeight: 600 }}>
+                      Se vinculó <strong>{assignTagResult.tagName}</strong> a {assignTagResult.updated} contacto{assignTagResult.updated === 1 ? '' : 's'}
+                      {assignTagResult.alreadyTagged > 0 ? ` (${assignTagResult.alreadyTagged} ya la tenían).` : '.'}
+                    </p>
+                  )}
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <button
+                      type="button"
+                      onClick={handleAssignRunTag}
+                      disabled={!auditTagId || assigningTag}
+                      style={{
+                        padding: '0.75rem 1.4rem',
+                        background: !auditTagId || assigningTag ? 'rgba(239, 68, 68, 0.25)' : 'linear-gradient(135deg, #EF4444 0%, #B91C1C 100%)',
+                        border: 'none',
+                        borderRadius: 12,
+                        color: 'white',
+                        fontWeight: 800,
+                        fontSize: '0.72rem',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.08em',
+                        cursor: !auditTagId || assigningTag ? 'not-allowed' : 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.45rem',
+                      }}
+                    >
+                      {assigningTag ? <Spinner size={14} /> : null}
+                      {assigningTag ? 'Vinculando...' : 'Vincular a contactos'}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
                 {RUN_REASON_FILTERS.filter((f) => f.category !== 'SANDBOX_BLOCKED' || me?.isSandbox).map((f) => {

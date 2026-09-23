@@ -10,6 +10,7 @@ import { OrgMemberGuard } from '../auth/org-member.guard';
 import { BroadcastService } from './broadcast.service';
 import { SendBroadcastDto } from './dto/send-broadcast.dto';
 import { GenerateBroadcastMessageDto } from './dto/generate-message.dto';
+import { AssignRunTagDto } from './dto/assign-run-tag.dto';
 
 @Controller('broadcast')
 @UseGuards(JwtAuthGuard, OrgMemberGuard, RolesGuard)
@@ -154,6 +155,17 @@ export class BroadcastController {
       limit: limit ? parseInt(limit, 10) : undefined,
       status: status as 'sent' | 'failed' | undefined,
       category,
+    });
+  }
+
+  @Post('runs/:runId/assign-tag')
+  async assignRunTag(
+    @CurrentUser() user: AuthUser,
+    @Param('runId') runId: string,
+    @Body() dto: AssignRunTagDto,
+  ) {
+    return this.broadcast.assignTagToRunContacts(user.organizationId!, runId, dto.tagId, {
+      onlySent: dto.onlySent,
     });
   }
 }

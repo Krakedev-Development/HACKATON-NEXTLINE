@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import { MessageDirection, MessageStatus, MessageType } from '@prisma/client';
@@ -922,6 +922,68 @@ export class BroadcastService {
     });
 
     return { contacts, nextCursor };
+  }
+
+  /** Vincula una etiqueta a los contactos de un masivo ya enviado (sobrescribe tag previo). */
+  async assignTagToRunContacts(
+    organizationId: string,
+    runId: string,
+    tagId: string,
+    options: { onlySent?: boolean } = {},
+  ): Promise<{ updated: number; total: number; alreadyTagged: number; tagName: string }> {
+    const tag = await this.prisma.tag.findFirst({
+      where: { id: tagId, organizationId },
+    });
+    if (!tag) throw new NotFoundException('Etiqueta no encontrada');
+
+    const logs = await this.prisma.broadcastLog.findMany({
+      where: {
+        organizationId,
+        runId,
+        ...(options.onlySent ? { status: 'sent' } : {}),
+      },
+      select: { conversationId: true },
+    });
+
+    if (!logs.length) {
+      const anyLog = await this.prisma.broadcastLog.findFirst({
+        where: { organizationId, runId },
+        select: { id: true },
+      });
+      if (!anyLog) throw new NotFoundException('Masivo no encontrado');
+      return { updated: 0, total: 0, alreadyTagged: 0, tagName: tag.name };
+    }
+
+    const conversationIds = [...new Set(logs.map((l) => l.conversationId))];
+    const conversations = await this.prisma.conversation.findMany({
+      where: { id: { in: conversationIds } },
+      select: { contactId: true, contact: { select: { tagId: true, organizationId: true } } },
+    });
+
+    const uniqueContacts = new Map<string, string | null>();
+    for (const c of conversations) {
+      if (c.contact.organizationId !== organizationId) continue;
+      uniqueContacts.set(c.contactId, c.contact.tagId);
+    }
+
+    const contactIds = [...uniqueContacts.keys()];
+    const alreadyTagged = [...uniqueContacts.values()].filter((id) => id === tagId).length;
+
+    if (!contactIds.length) {
+      return { updated: 0, total: 0, alreadyTagged: 0, tagName: tag.name };
+    }
+
+    const result = await this.prisma.contact.updateMany({
+      where: { id: { in: contactIds }, organizationId },
+      data: { tagId },
+    });
+
+    return {
+      updated: result.count,
+      total: contactIds.length,
+      alreadyTagged,
+      tagName: tag.name,
+    };
   }
 
   private async logBroadcast(
