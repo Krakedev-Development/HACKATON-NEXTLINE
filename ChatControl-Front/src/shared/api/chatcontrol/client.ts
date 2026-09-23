@@ -838,6 +838,23 @@ export async function getBroadcastRunContacts(
   return api(`/broadcast/runs/${encodeURIComponent(runId)}/contacts${query ? `?${query}` : ''}`);
 }
 
+export interface AssignRunTagResult {
+  updated: number;
+  total: number;
+  alreadyTagged: number;
+  tagName: string;
+}
+
+export async function assignTagToBroadcastRun(
+  runId: string,
+  body: { tagId: string; onlySent?: boolean },
+): Promise<AssignRunTagResult> {
+  return api(`/broadcast/runs/${encodeURIComponent(runId)}/assign-tag`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 export async function sendMediaFile(
   conversationId: string,
   file: File,
