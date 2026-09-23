@@ -38,6 +38,7 @@ import { formatPhoneDisplay, humanizeTemplateName } from '@/lib/format';
 import { Spinner } from '@/shared/ui/spinner';
 import { FileDropzone } from '@/shared/ui/molecules/file-dropzone';
 import { TagPicker } from '@/shared/ui/molecules/tag-picker';
+import { TemplateButtonsPreview } from '@/shared/ui/molecules/template-buttons-preview';
 import { useBroadcastProgress } from '@/widgets/broadcast-progress/BroadcastProgressProvider';
 
 const PAGE_SIZE = 50;
@@ -1602,6 +1603,9 @@ export default function BroadcastPage() {
                     <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Vista Previa del Mensaje</label>
                     <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', padding: '1.25rem', color: '#ddd', fontSize: '0.9rem', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
                       {renderTemplatePreviewNodes(selectedTemplate.body, templateVars, templateVarModes)}
+                      {selectedTemplate.buttons && selectedTemplate.buttons.length > 0 && (
+                        <TemplateButtonsPreview buttons={selectedTemplate.buttons} compact />
+                      )}
                     </div>
                   </div>
                 )}
@@ -1727,11 +1731,11 @@ export default function BroadcastPage() {
                   </div>
                 )}
 
-                {selectedTemplate?.buttons && selectedTemplate.buttons.length > 0 && (
+                {selectedTemplate?.buttons?.some((btn) => btn.dynamic) && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                     <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Variables de Botones</label>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                      {selectedTemplate.buttons.map(btn => (
+                      {selectedTemplate.buttons.filter((btn) => btn.dynamic).map(btn => (
                         <input
                           key={btn.index}
                           type="text"
