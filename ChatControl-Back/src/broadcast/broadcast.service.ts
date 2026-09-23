@@ -876,12 +876,23 @@ export class BroadcastService {
     nextCursor: string | null;
   }> {
     const take = options.limit && options.limit > 0 ? Math.min(options.limit, 200) : 10;
+    const categoryFilter =
+      options.category === 'PAYMENT_ISSUE'
+        ? {
+            OR: [
+              { failureCategory: 'PAYMENT_ISSUE' },
+              { failureCategory: 'OTHER', errorMessage: { contains: 'payment', mode: 'insensitive' as const } },
+            ],
+          }
+        : options.category
+          ? { failureCategory: options.category }
+          : {};
     const logs = await this.prisma.broadcastLog.findMany({
       where: {
         organizationId,
         runId,
         status: options.status,
-        failureCategory: options.category,
+        ...categoryFilter,
       },
       orderBy: { createdAt: 'desc' },
       take: take + 1,
@@ -902,12 +913,15 @@ export class BroadcastService {
 
     const contacts = logs.map((l) => {
       const contact = contactByConversation.get(l.conversationId);
-      const category = l.failureCategory as BroadcastFailureCategory | null;
+      const refined = l.errorMessage ? classifyWhatsAppFailure({ message: l.errorMessage }) : null;
+      const category = (refined?.category && refined.category !== 'OTHER'
+        ? refined.category
+        : l.failureCategory) as BroadcastFailureCategory | null;
       return {
         name: contact?.name ?? null,
         phone: contact?.phone ?? '',
         status: l.status,
-        failureCategory: l.failureCategory,
+        failureCategory: category,
         failureLabel: category ? FAILURE_CATEGORY_FILTER_LABELS[category] ?? category : null,
         errorMessage: l.errorMessage,
         createdAt: l.createdAt.toISOString(),

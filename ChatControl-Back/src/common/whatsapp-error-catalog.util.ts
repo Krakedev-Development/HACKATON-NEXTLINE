@@ -4,6 +4,7 @@ export type BroadcastFailureCategory =
   | 'META_EXPERIMENT'
   | 'OUT_OF_WINDOW'
   | 'SANDBOX_BLOCKED'
+  | 'PAYMENT_ISSUE'
   | 'OTHER';
 
 interface FailureClassification {
@@ -18,6 +19,7 @@ export const FAILURE_CATEGORY_FILTER_LABELS: Record<BroadcastFailureCategory, st
   NO_WHATSAPP: 'Sin WhatsApp',
   OUT_OF_WINDOW: 'Fuera de ventana',
   SANDBOX_BLOCKED: 'Sandbox',
+  PAYMENT_ISSUE: 'Pago / facturación',
   OTHER: 'Plataforma/Conexión',
 };
 
@@ -26,6 +28,7 @@ const CODE_CATEGORY_MAP: Record<number, FailureClassification> = {
   131049: { category: 'SPAM_BLOCKED', label: 'Rechazados para evitar spam' },
   131026: { category: 'NO_WHATSAPP', label: 'Números sin WhatsApp' },
   130472: { category: 'META_EXPERIMENT', label: 'Bloqueados por experimento de Meta' },
+  131042: { category: 'PAYMENT_ISSUE', label: 'Problema de pago en Meta' },
 };
 
 /** Clasifica un fallo de envío de WhatsApp por código de Meta (async, vía webhook) o por texto (reglas propias, síncronas). */
@@ -43,6 +46,14 @@ export function classifyWhatsAppFailure(input: { code?: number; message?: string
   }
   if (msg.includes('límite de spam') || msg.includes('limite de spam')) {
     return { category: 'SPAM_BLOCKED', label: 'Rechazados para evitar spam' };
+  }
+  if (
+    msg.includes('eligibility payment') ||
+    msg.includes('payment issue') ||
+    msg.includes('payment method') ||
+    msg.includes('131042')
+  ) {
+    return { category: 'PAYMENT_ISSUE', label: 'Problema de pago en Meta' };
   }
 
   return { category: 'OTHER', label: 'Error de conexión / plataforma' };
