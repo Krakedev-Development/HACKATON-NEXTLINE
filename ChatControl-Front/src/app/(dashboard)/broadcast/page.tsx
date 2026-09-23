@@ -133,6 +133,7 @@ const RUN_REASON_FILTERS: Array<{ status?: 'sent' | 'failed'; category?: string;
   { status: 'failed', category: 'NO_WHATSAPP', label: 'Sin WhatsApp' },
   { status: 'failed', category: 'OUT_OF_WINDOW', label: 'Fuera de ventana' },
   { status: 'failed', category: 'SANDBOX_BLOCKED', label: 'Sandbox' },
+  { status: 'failed', category: 'PAYMENT_ISSUE', label: 'Pago' },
   { status: 'failed', category: 'OTHER', label: 'Otro' },
 ];
 
