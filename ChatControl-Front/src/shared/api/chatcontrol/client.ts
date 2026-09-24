@@ -110,6 +110,24 @@ export function isLoggedIn(): boolean {
   return !!getToken();
 }
 
+export interface AdReferral {
+  source_url?: string;
+  source_id?: string;
+  source_type?: string;
+  headline?: string;
+  body?: string;
+  media_type?: string;
+  image_url?: string;
+  video_url?: string;
+  thumbnail_url?: string;
+  ctwa_clid?: string;
+  welcome_message?: {
+    text?: string;
+    [key: string]: any;
+  } | string;
+  [key: string]: any;
+}
+
 // Chat
 export interface Conversation {
   id: string;
@@ -128,6 +146,7 @@ export interface Conversation {
   unreadCount?: number;
   assignedToUserId?: string | null;
   isNewLead?: boolean;
+  adReferral?: AdReferral | null;
 }
 
 export interface Message {
@@ -142,6 +161,7 @@ export interface Message {
   mimeType?: string | null;
   fileName?: string | null;
   status?: string;
+  referral?: AdReferral | null;
   replyTo?: {
     id: string;
     text: string;

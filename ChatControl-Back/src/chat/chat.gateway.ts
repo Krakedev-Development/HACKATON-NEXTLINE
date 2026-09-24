@@ -36,6 +36,7 @@ export interface NewMessagePayload {
       mediaUrl?: string | null;
     } | null;
     isReply?: boolean;
+    referral?: any;
   };
   companyId?: string;
 }

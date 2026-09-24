@@ -25,6 +25,19 @@ export interface Message {
   mimeType?: string | null;
   fileName?: string | null;
   status?: string;
+  referral?: {
+    source_url?: string;
+    source_id?: string;
+    source_type?: string;
+    headline?: string;
+    body?: string;
+    media_type?: string;
+    image_url?: string;
+    video_url?: string;
+    thumbnail_url?: string;
+    ctwa_clid?: string;
+    [key: string]: any;
+  } | null;
   replyTo?: {
     id: string;
     text: string;
@@ -51,6 +64,7 @@ export interface Conversation {
   unreadCount: number;
   assignedToUserId?: string | null;
   isNewLead?: boolean;
+  adReferral?: any;
 }
 
 @Injectable()
@@ -82,13 +96,25 @@ export class ChatService {
     fileName?: string;
     contactName?: string;
     replyToWamid?: string;
+    referral?: Record<string, any>;
   }): Promise<void> {
     const phone = normalizePhone(payload.from);
 
-    // Obtener campaña activa antes de crear/actualizar todo
-    const activeCampaign = await this.prisma.campaign.findFirst({
+    // Obtener campaña activa (intentando coincidir por titular si el lead viene de un anuncio)
+    let matchedCampaign: any = null;
+    if (payload.referral?.headline && typeof payload.referral.headline === 'string') {
+      matchedCampaign = await this.prisma.campaign.findFirst({
+        where: {
+          organizationId: payload.organizationId,
+          isActive: true,
+          name: { contains: payload.referral.headline.trim(), mode: 'insensitive' },
+        },
+      });
+    }
+
+    const activeCampaign = matchedCampaign || (await this.prisma.campaign.findFirst({
       where: { organizationId: payload.organizationId, isActive: true },
-    });
+    }));
     const activeCampaignId = activeCampaign?.id ?? null;
 
     const contactUpdateData: any = {};
@@ -124,12 +150,16 @@ export class ChatService {
           contactId: contact.id,
           lastUserMessageAt: new Date(payload.timestamp),
           campaignId: activeCampaignId,
+          adReferral: payload.referral ? (payload.referral as any) : undefined,
         },
       });
     } else {
       const updateData: any = { lastUserMessageAt: new Date(payload.timestamp) };
       if (activeCampaignId && conversation.campaignId !== activeCampaignId) {
         updateData.campaignId = activeCampaignId;
+      }
+      if (payload.referral) {
+        updateData.adReferral = payload.referral as any;
       }
       await this.prisma.conversation.update({
         where: { id: conversation.id },
@@ -222,6 +252,7 @@ export class ChatService {
           whatsappTimestamp: new Date(payload.timestamp),
           replyToId,
           replyToWamid: payload.replyToWamid,
+          referral: payload.referral ? (payload.referral as any) : undefined,
         },
       });
 
@@ -244,6 +275,7 @@ export class ChatService {
           type: payload.type || MessageType.TEXT,
           replyTo: replyToSnapshot,
           isReply: !!payload.replyToWamid,
+          referral: created.referral,
         } as any,
       );
     }
@@ -323,6 +355,7 @@ export class ChatService {
       mimeType: m.mimeType,
       fileName: m.fileName,
       status: m.status,
+      referral: (m as any).referral ?? undefined,
       replyTo: m.replyTo
         ? {
             id: m.replyTo.id,

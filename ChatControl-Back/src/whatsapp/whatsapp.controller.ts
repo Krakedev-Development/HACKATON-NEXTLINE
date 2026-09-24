@@ -117,7 +117,20 @@ export class WhatsAppController {
                   button_reply?: { id: string; title: string };
                   list_reply?: { id: string; title: string };
                 };
-                context?: { from: string; id: string };
+                context?: { from: string; id: string; referral?: Record<string, unknown> };
+                referral?: {
+                  source_url?: string;
+                  source_id?: string;
+                  source_type?: string;
+                  headline?: string;
+                  body?: string;
+                  media_type?: string;
+                  image_url?: string;
+                  video_url?: string;
+                  thumbnail_url?: string;
+                  ctwa_clid?: string;
+                  [key: string]: unknown;
+                };
               }>;
               statuses?: Array<{
                 id: string;
@@ -220,8 +233,11 @@ export class WhatsAppController {
         for (const msg of val.messages) {
           const pushName = contactsList.find(c => c.wa_id === msg.from)?.profile?.name;
           const isMedia = ['image', 'video', 'audio', 'document', 'sticker'].includes(msg.type);
+          const referral = msg.referral || (msg as any).context?.referral || undefined;
 
-          this.logger.log(`Mensaje entrante type=${msg.type} context=${JSON.stringify((msg as any).context)}`);
+          this.logger.log(
+            `Mensaje entrante type=${msg.type} context=${JSON.stringify((msg as any).context)} referral=${JSON.stringify(referral)}`,
+          );
 
           if (msg.type === 'text' && msg.text?.body) {
             await this.chat.registerIncomingMessage({
@@ -233,6 +249,7 @@ export class WhatsAppController {
               text: msg.text.body,
               type: MessageType.TEXT,
               replyToWamid: msg.context?.id,
+              referral,
             });
           } else if (msg.type === 'button' && msg.button?.text) {
             await this.chat.registerIncomingMessage({
@@ -244,6 +261,7 @@ export class WhatsAppController {
               text: msg.button.text,
               type: MessageType.TEXT,
               replyToWamid: msg.context?.id,
+              referral,
             });
           } else if (msg.type === 'interactive' && (msg.interactive?.button_reply || msg.interactive?.list_reply)) {
             const replyText = msg.interactive.button_reply?.title || msg.interactive.list_reply?.title || '';
@@ -256,6 +274,7 @@ export class WhatsAppController {
               text: replyText,
               type: MessageType.TEXT,
               replyToWamid: msg.context?.id,
+              referral,
             });
           } else if (isMedia) {
             const mediaData = (msg as any)[msg.type];
@@ -278,12 +297,13 @@ export class WhatsAppController {
                     contactName: pushName,
                     messageId: msg.id,
                     timestamp: parseInt(msg.timestamp, 10) * 1000,
-                    text: '',
+                    text: mediaData.caption || '',
                     type: dbType,
                     mediaUrl,
                     mimeType: downloaded.mimeType,
                     fileName: mediaData.filename || undefined,
                     replyToWamid: msg.context?.id,
+                    referral,
                   });
                 } else {
                   this.logger.error(`No se pudo subir a Supabase el archivo de WhatsApp ${mediaId}`);

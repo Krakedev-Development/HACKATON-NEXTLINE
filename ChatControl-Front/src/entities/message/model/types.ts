@@ -9,6 +9,7 @@ export interface Message {
   mediaUrl?: string | null;
   mimeType?: string | null;
   fileName?: string | null;
+  referral?: any;
 }
 
 export interface NewMessagePayload {

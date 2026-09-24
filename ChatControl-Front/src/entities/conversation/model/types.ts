@@ -7,4 +7,5 @@ export interface Conversation {
   lastMessagePreview: string;
   lastMessageAt: number;
   unreadCount?: number;
+  adReferral?: any;
 }

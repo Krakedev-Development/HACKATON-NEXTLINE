@@ -48,6 +48,7 @@ export class ConversationsQueryService {
         unreadCount,
         assignedToUserId: c.assignedToUserId,
         isNewLead: c.isNewLead,
+        adReferral: (c as any).adReferral ?? undefined,
       };
     });
     return withUnread.sort((a, b) => b.lastMessageAt - a.lastMessageAt);
@@ -92,6 +93,7 @@ export class ConversationsQueryService {
       unreadCount,
       assignedToUserId: c.assignedToUserId,
       isNewLead: c.isNewLead,
+      adReferral: (c as any).adReferral ?? undefined,
     };
   }
 
