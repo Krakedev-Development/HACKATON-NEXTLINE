@@ -67,6 +67,15 @@ function ReplyIcon({ style }: { style?: React.CSSProperties }) {
   );
 }
 
+function MegaphoneIcon({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg style={{ width: '1rem', height: '1rem', ...style }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m3 11 18-5v12L3 14v-3z" />
+      <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
+    </svg>
+  );
+}
+
 function PlayIcon({ style }: { style?: React.CSSProperties }) {
   return (
     <svg style={{ width: '0.9rem', height: '0.9rem', ...style }} viewBox="0 0 24 24" fill="currentColor">
@@ -88,6 +97,18 @@ function formatAudioTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60).toString().padStart(2, '0');
   return `${m}:${s}`;
+}
+
+function getAdUrl(referral?: any): string | undefined {
+  if (!referral) return undefined;
+  const url = referral.source_url;
+  if (url && url !== 'https://facebook.com' && url !== 'https://www.facebook.com') {
+    return url;
+  }
+  if (referral.source_id) {
+    return `https://www.facebook.com/ads/library/?id=${referral.source_id}`;
+  }
+  return url || undefined;
 }
 
 /** Reproductor de audio con estilos propios: el <audio controls> nativo no se puede
@@ -879,6 +900,97 @@ export default function ChatPage() {
                           border: isSticker || ((isImage || isVideo) && !m.text) ? 'none' : isAgent ? 'none' : '1px solid rgba(255,255,255,0.05)',
                           overflow: 'hidden'
                         }}>
+                          {m.referral && (
+                            <div
+                              style={{
+                                background: 'rgba(0,0,0,0.35)',
+                                border: '1px solid rgba(239, 68, 68, 0.4)',
+                                borderLeft: '4px solid #EF4444',
+                                borderRadius: '10px',
+                                padding: '0.65rem 0.85rem',
+                                marginBottom: '0.75rem',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '0.35rem',
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: '#EF4444', fontSize: '0.7rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                  <MegaphoneIcon style={{ width: '0.8rem', height: '0.8rem' }} />
+                                  <span>
+                                    {m.referral.source_url?.toLowerCase().includes('instagram') ? 'Anuncio de Instagram' : 'Anuncio de Facebook'}
+                                  </span>
+                                </div>
+                                {getAdUrl(m.referral) && (
+                                  <a
+                                    href={getAdUrl(m.referral)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    style={{
+                                      fontSize: '0.68rem',
+                                      color: 'rgba(255,255,255,0.75)',
+                                      textDecoration: 'none',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '0.25rem',
+                                      background: 'rgba(255,255,255,0.08)',
+                                      padding: '0.2rem 0.45rem',
+                                      borderRadius: '6px',
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    <span>Ver anuncio</span>
+                                    <svg style={{ width: '0.65rem', height: '0.65rem' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                                      <polyline points="15 3 21 3 21 9" />
+                                      <line x1="10" y1="14" x2="21" y2="3" />
+                                    </svg>
+                                  </a>
+                                )}
+                              </div>
+                              {(m.referral.image_url || m.referral.thumbnail_url || m.referral.video_url) && (
+                                <div style={{ borderRadius: '8px', overflow: 'hidden', maxHeight: '160px', marginTop: '0.2rem' }}>
+                                  <img
+                                    src={m.referral.image_url || m.referral.thumbnail_url || m.referral.video_url}
+                                    alt={m.referral.headline || "Anuncio"}
+                                    style={{ width: '100%', height: 'auto', maxHeight: '160px', objectFit: 'cover', display: 'block' }}
+                                    onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.display = 'none'; }}
+                                  />
+                                </div>
+                              )}
+                              {(() => {
+                                const welcomeText = typeof m.referral.welcome_message === 'string'
+                                  ? m.referral.welcome_message
+                                  : m.referral.welcome_message?.text;
+                                return welcomeText ? (
+                                  <div style={{
+                                    background: 'rgba(255, 255, 255, 0.05)',
+                                    borderRadius: '8px',
+                                    padding: '0.45rem 0.65rem',
+                                    border: '1px dashed rgba(255, 255, 255, 0.12)',
+                                  }}>
+                                    <div style={{ fontSize: '0.65rem', color: '#EF4444', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.2rem' }}>
+                                      Saludo automático
+                                    </div>
+                                    <div style={{ fontSize: '0.82rem', color: 'rgba(255, 255, 255, 0.95)', lineHeight: '1.4' }}>
+                                      {welcomeText}
+                                    </div>
+                                  </div>
+                                ) : null;
+                              })()}
+                              {m.referral.headline && (
+                                <div style={{ fontSize: '0.82rem', fontWeight: 800, color: 'white', lineHeight: '1.3' }}>
+                                  {m.referral.headline}
+                                </div>
+                              )}
+                              {m.referral.body && (
+                                <div style={{ fontSize: '0.75rem', color: 'rgba(255, 255, 255, 0.72)', lineHeight: '1.35' }}>
+                                  {m.referral.body}
+                                </div>
+                              )}
+                            </div>
+                          )}
                           {m.replyTo && (
                             <div
                               onClick={() => document.getElementById(`msg-${m.replyTo!.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
@@ -1171,6 +1283,88 @@ export default function ChatPage() {
               )}
             </div>
           </div>
+
+          {/* Anuncio de origen (CTWA) si el lead provino de pauta publicitaria */}
+          {(() => {
+            const ad = (selectedConv as any).adReferral || messages.find(m => m.referral)?.referral;
+            if (!ad) return null;
+            return (
+              <div style={{
+                background: 'rgba(239, 68, 68, 0.05)',
+                border: '1px solid rgba(239, 68, 68, 0.25)',
+                borderLeft: '4px solid #EF4444',
+                borderRadius: '12px',
+                padding: '0.85rem',
+                marginBottom: '1.5rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.4rem',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: '#EF4444', fontSize: '0.7rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    <MegaphoneIcon style={{ width: '0.85rem', height: '0.85rem' }} />
+                    <span>Origen: {ad.source_url?.toLowerCase().includes('instagram') ? 'Anuncio Instagram' : 'Anuncio Facebook'}</span>
+                  </div>
+                  {getAdUrl(ad) && (
+                    <a
+                      href={getAdUrl(ad)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ fontSize: '0.7rem', color: '#EF4444', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '0.2rem', fontWeight: 700 }}
+                    >
+                      Ver anuncio ↗
+                    </a>
+                  )}
+                </div>
+                {(ad.image_url || ad.thumbnail_url || ad.video_url) && (
+                  <div style={{ borderRadius: '8px', overflow: 'hidden', maxHeight: '120px', marginTop: '0.2rem' }}>
+                    <img
+                      src={ad.image_url || ad.thumbnail_url || ad.video_url}
+                      alt={ad.headline || "Anuncio"}
+                      style={{ width: '100%', height: 'auto', maxHeight: '120px', objectFit: 'cover', display: 'block' }}
+                      onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.display = 'none'; }}
+                    />
+                  </div>
+                )}
+                {(() => {
+                  const welcomeText = typeof ad.welcome_message === 'string'
+                    ? ad.welcome_message
+                    : ad.welcome_message?.text;
+                  return welcomeText ? (
+                    <div style={{
+                      background: 'rgba(255, 255, 255, 0.04)',
+                      borderRadius: '8px',
+                      padding: '0.4rem 0.6rem',
+                      border: '1px dashed rgba(255, 255, 255, 0.1)',
+                      fontSize: '0.78rem',
+                      color: 'rgba(255, 255, 255, 0.9)',
+                      lineHeight: '1.35',
+                    }}>
+                      <div style={{ fontSize: '0.62rem', color: '#EF4444', fontWeight: 800, textTransform: 'uppercase', marginBottom: '0.2rem' }}>
+                        Saludo automático
+                      </div>
+                      {welcomeText}
+                    </div>
+                  ) : null;
+                })()}
+                {ad.headline && (
+                  <div style={{ fontSize: '0.82rem', fontWeight: 800, color: 'white', lineHeight: '1.3' }}>
+                    {ad.headline}
+                  </div>
+                )}
+                {ad.body && (
+                  <div style={{ fontSize: '0.75rem', color: 'rgba(255, 255, 255, 0.7)', lineHeight: '1.35', maxHeight: '90px', overflowY: 'auto' }}>
+                    {ad.body}
+                  </div>
+                )}
+                {ad.source_id && (
+                  <div style={{ fontSize: '0.65rem', color: '#666', fontFamily: 'monospace', marginTop: '0.2rem' }}>
+                    ID: {ad.source_id}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Formulario de Edición */}
           <form onSubmit={handleUpdateContact} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '2rem', marginBottom: '2rem' }}>
