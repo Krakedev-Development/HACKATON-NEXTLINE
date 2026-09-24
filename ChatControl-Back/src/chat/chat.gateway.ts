@@ -222,6 +222,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server.to(`org:${organizationId}`).emit('new_message', payload);
   }
 
+  emitConversationRead(organizationId: string, conversationId: string): void {
+    this.server.to(`org:${organizationId}`).emit('conversation_read', { conversationId });
+  }
+
   emitConversationAssigned(organizationId: string, conversationId: string, assignedToUserId: string): void {
     this.server.to(`org:${organizationId}`).emit('conversation_assigned', {
       conversationId,

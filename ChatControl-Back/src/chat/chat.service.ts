@@ -300,10 +300,21 @@ export class ChatService {
 
   async markConversationAsRead(conversationId: string, organizationId: string): Promise<void> {
     await this.assertConversationInOrg(conversationId, organizationId);
+    const latestMessage = await this.prisma.message.findFirst({
+      where: { conversationId },
+      orderBy: { whatsappTimestamp: 'desc' },
+      select: { whatsappTimestamp: true },
+    });
+    const now = new Date();
+    const readTime =
+      latestMessage && latestMessage.whatsappTimestamp > now
+        ? new Date(latestMessage.whatsappTimestamp.getTime() + 1000)
+        : now;
     await this.prisma.conversation.update({
       where: { id: conversationId },
-      data: { lastReadAt: new Date() },
+      data: { lastReadAt: readTime },
     });
+    this.chatGateway.emitConversationRead(organizationId, conversationId);
   }
 
   async getConversationsWithWindowStatus(
