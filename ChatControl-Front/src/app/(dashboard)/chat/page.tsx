@@ -336,7 +336,6 @@ export default function ChatPage() {
     socketRef.current = socket;
 
     socket.on('new_message', (payload: NewMessagePayload) => {
-      loadConversations(false);
       if (payload.conversationId === selectedIdRef.current) {
         setMessages(prev => {
           // Si ya existe por ID real, no duplicar
@@ -353,7 +352,21 @@ export default function ChatPage() {
           // Mensaje entrante del contacto: agregar normalmente
           return [...prev, { ...payload.message, status: payload.message.status || 'RECEIVED' }];
         });
-        markConversationAsRead(payload.conversationId);
+        markConversationAsRead(payload.conversationId).catch(() => {});
+        setConversations(prev =>
+          prev.map(c =>
+            c.id === payload.conversationId
+              ? {
+                  ...c,
+                  unreadCount: 0,
+                  lastMessagePreview: payload.message.text,
+                  lastMessageAt: payload.message.timestamp,
+                }
+              : c
+          )
+        );
+      } else {
+        loadConversations(false);
       }
     });
 
@@ -386,8 +399,14 @@ export default function ChatPage() {
         setTimeout(() => setToastMessage(''), 5000);
       }
       if (selectedIdRef.current === p.conversationId) {
-        markConversationAsRead(p.conversationId);
+        markConversationAsRead(p.conversationId).catch(() => {});
       }
+    });
+
+    socket.on('conversation_read', (p: { conversationId: string }) => {
+      setConversations(prev =>
+        prev.map(c => (c.id === p.conversationId ? { ...c, unreadCount: 0 } : c))
+      );
     });
 
     socket.on('typing', (p: any) => {
@@ -405,6 +424,9 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (!selectedId) return;
+    setConversations(prev =>
+      prev.map(c => (c.id === selectedId ? { ...c, unreadCount: 0 } : c))
+    );
     isLoadingOlderRef.current = false;
     (async () => {
       setLoadingMessages(true);
@@ -416,7 +438,7 @@ export default function ChatPage() {
         setMessages(msgRes.messages);
         setNextCursor(msgRes.nextCursor);
         setCanSend(convRes.canSend ?? false);
-        markConversationAsRead(selectedId);
+        await markConversationAsRead(selectedId);
       } catch (err) {} finally {
         setLoadingMessages(false);
       }
@@ -462,11 +484,21 @@ export default function ChatPage() {
     if (showLoading) setLoading(true);
     try {
       const list = await getConversations();
-      setConversations(list);
+      setConversations(
+        list.map(c => (c.id === selectedIdRef.current ? { ...c, unreadCount: 0 } : c))
+      );
     } catch (err) {} finally {
       setLoading(false);
     }
   }
+
+  const handleSelectConversation = (convId: string) => {
+    setSelectedId(convId);
+    setConversations(prev =>
+      prev.map(c => (c.id === convId ? { ...c, unreadCount: 0 } : c))
+    );
+    markConversationAsRead(convId).catch(() => {});
+  };
 
   async function handleSend() {
     if (!selectedId || !replyInput.trim() || sending || !canSend || sendingRef.current) return;
@@ -487,6 +519,13 @@ export default function ChatPage() {
       replyTo: quoted ? { id: quoted.id, text: quoted.text, fromUser: quoted.fromUser, type: quoted.type, mediaUrl: quoted.mediaUrl } : undefined,
     };
     setMessages(prev => [...prev, optimistic]);
+    setConversations(prev =>
+      prev.map(c =>
+        c.id === selectedId
+          ? { ...c, lastMessagePreview: `Tú: ${text}`, lastMessageAt: Date.now(), unreadCount: 0 }
+          : c
+      )
+    );
     try {
       const res = await sendMessage(selectedId, text, quoted?.id);
       setMessages(prev => {
@@ -549,6 +588,13 @@ export default function ChatPage() {
       setMessages(msgRes.messages);
       setSelectedFile(null);
       setFilePreview(null);
+      setConversations(prev =>
+        prev.map(c =>
+          c.id === selectedId
+            ? { ...c, lastMessagePreview: 'Tú: Archivo multimedia', lastMessageAt: Date.now(), unreadCount: 0 }
+            : c
+        )
+      );
     } catch (err: any) {
       alert(err.message || 'Error al enviar archivo');
     } finally {
@@ -734,47 +780,50 @@ export default function ChatPage() {
               </div>
               <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#222', textTransform: 'uppercase', letterSpacing: '0.2em' }}>Sincronizando</span>
             </div>
-          ) : filteredConversations.map(c => (
-            <button 
-              key={c.id}
-              onClick={() => setSelectedId(c.id)}
-              style={{ 
-                width: '100%', 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: '1rem', 
-                padding: '1rem', 
-                borderRadius: '16px', 
-                border: 'none', 
-                background: selectedId === c.id ? 'rgba(239, 68, 68, 0.08)' : 'transparent',
-                cursor: 'pointer',
-                transition: 'all 0.2s ease',
-                textAlign: 'left',
-                marginBottom: '0.25rem',
-                position: 'relative'
-              }}
-              onMouseEnter={(e) => { if(selectedId !== c.id) e.currentTarget.style.background = 'rgba(255,255,255,0.02)'; }}
-              onMouseLeave={(e) => { if(selectedId !== c.id) e.currentTarget.style.background = 'transparent'; }}
-            >
-              <div style={{ width: '48px', height: '48px', borderRadius: '14px', background: selectedId === c.id ? '#EF4444' : 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: selectedId === c.id ? 'white' : '#666', transition: 'all 0.3s' }}>
-                <PersonIcon />
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.2rem' }}>
-                  <span style={{ fontWeight: 700, fontSize: '0.95rem', color: selectedId === c.id ? 'white' : '#F2F2F2', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {c.name || formatPhoneDisplay(c.phone)}
-                  </span>
-                  <span style={{ fontSize: '0.7rem', color: '#444' }}>{c.lastMessageAt ? formatConversationDate(c.lastMessageAt) : ''}</span>
+          ) : filteredConversations.map(c => {
+            const isUnread = (c.unreadCount ?? 0) > 0 && selectedId !== c.id;
+            return (
+              <button 
+                key={c.id}
+                onClick={() => handleSelectConversation(c.id)}
+                style={{ 
+                  width: '100%', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '1rem', 
+                  padding: '1rem', 
+                  borderRadius: '16px', 
+                  border: 'none', 
+                  background: selectedId === c.id ? 'rgba(239, 68, 68, 0.08)' : 'transparent',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  textAlign: 'left',
+                  marginBottom: '0.25rem',
+                  position: 'relative'
+                }}
+                onMouseEnter={(e) => { if(selectedId !== c.id) e.currentTarget.style.background = 'rgba(255,255,255,0.02)'; }}
+                onMouseLeave={(e) => { if(selectedId !== c.id) e.currentTarget.style.background = 'transparent'; }}
+              >
+                <div style={{ width: '48px', height: '48px', borderRadius: '14px', background: selectedId === c.id ? '#EF4444' : 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: selectedId === c.id ? 'white' : '#666', transition: 'all 0.3s' }}>
+                  <PersonIcon />
                 </div>
-                <p style={{ fontSize: '0.8rem', color: (c.unreadCount ?? 0) > 0 ? '#EF4444' : '#666', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: (c.unreadCount ?? 0) > 0 ? 700 : 400 }}>
-                  {c.lastMessagePreview || 'Inicia una conversación'}
-                </p>
-              </div>
-              {(c.unreadCount ?? 0) > 0 && (
-                <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#EF4444', position: 'absolute', right: '1.25rem', top: '50%', transform: 'translateY(-50%)', boxShadow: '0 0 10px #EF4444' }}></div>
-              )}
-            </button>
-          ))}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.2rem' }}>
+                    <span style={{ fontWeight: 700, fontSize: '0.95rem', color: selectedId === c.id ? 'white' : '#F2F2F2', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {c.name || formatPhoneDisplay(c.phone)}
+                    </span>
+                    <span style={{ fontSize: '0.7rem', color: '#444' }}>{c.lastMessageAt ? formatConversationDate(c.lastMessageAt) : ''}</span>
+                  </div>
+                  <p style={{ fontSize: '0.8rem', color: isUnread ? '#EF4444' : (selectedId === c.id ? '#999' : '#666'), margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: isUnread ? 700 : 400 }}>
+                    {c.lastMessagePreview || 'Inicia una conversación'}
+                  </p>
+                </div>
+                {isUnread && (
+                  <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#EF4444', position: 'absolute', right: '1.25rem', top: '50%', transform: 'translateY(-50%)', boxShadow: '0 0 10px #EF4444' }}></div>
+                )}
+              </button>
+            );
+          })}
         </div>
       </aside>
 
@@ -868,11 +917,10 @@ export default function ChatPage() {
                     const isAudio = m.type === 'AUDIO';
                     const isDocument = m.type === 'DOCUMENT';
                     const isSticker = isImage && m.mimeType?.toLowerCase() === 'image/webp';
-                    // WhatsApp le da a los mensajes con foto/video un ancho de "tarjeta" fijo
+                    // WhatsApp le da a los mensajes con foto/video y anuncios un ancho de "tarjeta" fijo
                     // (el contenido se adapta a ese ancho), a diferencia del texto que se ajusta
-                    // libremente al contenido. Sin esto, un video vertical quedaba diminuto,
-                    // limitado solo por maxHeight, "como en una esquinita" de la burbuja.
-                    const isMediaCard = (isImage || isVideo) && !isSticker;
+                    // libremente al contenido. Sin esto, un video o anuncio se estira demasiado horizontalmente.
+                    const isMediaCard = ((isImage || isVideo) && !isSticker) || !!m.referral;
 
                     return (
                       <Fragment key={m.id}>
