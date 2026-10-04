@@ -1,5 +1,5 @@
 import {
-  Body, Controller, Get, Post, Headers, HttpCode, HttpStatus, UseGuards,
+  Body, Controller, Get, Post, Headers, HttpCode, HttpStatus, UseGuards, BadRequestException, ForbiddenException,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -14,12 +14,14 @@ import { CheckUserDto } from './dto/check-user.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { UserRole } from '@prisma/client';
 import { CrmIntegrationRateLimitGuard } from './crm-integration-rate-limit.guard';
+import { ContactsService } from '../contacts/contacts.service';
 
 @Controller('crm-integrations')
 export class CrmIntegrationsController {
   constructor(
     private readonly service: CrmIntegrationsService,
     private readonly prisma: PrismaService,
+    private readonly contacts: ContactsService,
   ) {}
 
   // ── Endpoints protegidos (requieren JWT + rol ORG_ADMIN) ──
@@ -133,6 +135,27 @@ export class CrmIntegrationsController {
     return { logs };
   }
 
+  @Post('reports/send-to-crm')
+  @UseGuards(JwtAuthGuard, OrgMemberGuard, RolesGuard)
+  @Roles(UserRole.ORG_ADMIN)
+  @HttpCode(HttpStatus.OK)
+  async sendReportToCrm(
+    @CurrentUser() user: AuthUser,
+    @Body() body: { contactIds?: string[] },
+  ) {
+    const ids = body?.contactIds;
+    if (!Array.isArray(ids) || ids.length < 1 || ids.length > 30 ||
+      ids.some((id) => typeof id !== 'string' || !id.trim()) ||
+      new Set(ids).size !== ids.length) {
+      throw new BadRequestException('Seleccione entre 1 y 30 contactos distintos por envío');
+    }
+    const rows = await this.contacts.exportContacts(user.organizationId!, ids, user.userId, user.role);
+    if (rows.length !== ids.length) {
+      throw new ForbiddenException('Uno o más contactos no pertenecen a su organización');
+    }
+    return this.service.sendReportToCrm(user.organizationId!, rows);
+  }
+
   // ── Endpoint público para vinculación desde CRM (sin JWT) ──
 
   @Post('verify-code-public')
@@ -166,11 +189,31 @@ export class CrmIntegrationsController {
     return {
       ok: true,
       apiKey: result.apiKey,
+      organizationId: integration.organizationId,
       message: 'Vinculación exitosa con CRM',
     };
   }
 
   // ── Endpoint público (sin JWT, autenticado via API Key + HMAC) ──
+
+  @Get('agents')
+  @UseGuards(CrmIntegrationRateLimitGuard)
+  async listAgentsForCrm(
+    @Headers('x-api-key') apiKey: string | undefined,
+    @Headers('x-hmac-signature') signature: string | undefined,
+  ) {
+    if (!apiKey || !signature) return { ok: false, error: 'Credenciales requeridas' };
+    const integration = await this.service.verifyApiKey(apiKey);
+    if (!integration || !this.service.verifyHmac('agents', signature)) {
+      return { ok: false, error: 'Credenciales inválidas' };
+    }
+    const agents = await this.prisma.user.findMany({
+      where: { organizationId: integration.organizationId, role: UserRole.AGENT, isActive: true },
+      select: { id: true, email: true, displayName: true },
+      orderBy: { email: 'asc' },
+    });
+    return { ok: true, agents };
+  }
 
   @Post('check-user')
   @UseGuards(CrmIntegrationRateLimitGuard)
@@ -194,7 +237,7 @@ export class CrmIntegrationsController {
       return { ok: false, error: 'Firma HMAC inválida' };
     }
 
-    const result = await this.service.checkUser(dto.email);
+    const result = await this.service.checkUser(dto.email, integration.organizationId);
     return { ok: true, ...result };
   }
 
@@ -220,7 +263,7 @@ export class CrmIntegrationsController {
       return { ok: false, error: 'Firma HMAC inválida' };
     }
 
-    const userCheck = await this.service.checkUser(dto.userEmail);
+    const userCheck = await this.service.checkUser(dto.userEmail, integration.organizationId);
     if (!userCheck.exists || !userCheck.user) {
       return { ok: false, error: `El usuario ${dto.userEmail} no existe en ChatControl` };
     }
@@ -232,8 +275,8 @@ export class CrmIntegrationsController {
     if (!user) {
       return { ok: false, error: `El usuario ${dto.userEmail} no existe en ChatControl` };
     }
-    if (!user.organizationId) {
-      return { ok: false, error: `El usuario ${dto.userEmail} no tiene una organización asignada en ChatControl` };
+    if (user.organizationId !== integration.organizationId) {
+      return { ok: false, error: `El usuario ${dto.userEmail} no pertenece a la organización vinculada` };
     }
 
     const normalizedContacts = dto.contacts.map((c) => ({
@@ -246,7 +289,7 @@ export class CrmIntegrationsController {
       source: c.source,
     })).filter((c) => c.externalId && c.phone);
 
-    const targetOrgId = user.organizationId || integration.organizationId;
+    const targetOrgId = integration.organizationId;
     const result = await this.service.syncContacts(
       targetOrgId,
       user.id,

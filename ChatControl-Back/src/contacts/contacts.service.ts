@@ -29,6 +29,7 @@ export interface ContactsFilter {
   agentIds?: string[];
   dateFrom?: string;
   dateTo?: string;
+  tagIds?: string[];
 }
 
 const MAX_PAGE_SIZE = 200;
@@ -59,6 +60,9 @@ export class ContactsService {
     }
     if (filter?.campaignIds?.length) {
       where.campaignId = { in: filter.campaignIds };
+    }
+    if (filter?.tagIds?.length) {
+      where.tagId = { in: filter.tagIds };
     }
     if (filter?.dateFrom || filter?.dateTo) {
       where.createdAt = {};
@@ -421,6 +425,11 @@ export class ContactsService {
     userId?: string,
     userRole?: string,
   ): Promise<Array<{
+    contactId: string;
+    crmLeadId: string;
+    tagId: string;
+    tagName: string;
+    agentId: string;
     campaign_name: string;
     form_name: string;
     email: string;
@@ -446,6 +455,12 @@ export class ContactsService {
     const contacts = await this.prisma.contact.findMany({
       where,
       include: {
+        tag: true,
+        crmContactLinks: {
+          select: { crmLeadId: true },
+          orderBy: { updatedAt: 'desc' },
+          take: 1,
+        },
         conversations: {
           where: userRole === 'AGENT' && userId
             ? { assignedToUserId: userId }
@@ -470,6 +485,11 @@ export class ContactsService {
         : 'Sin asignar';
 
       return {
+        contactId: c.id,
+        crmLeadId: c.crmContactLinks[0]?.crmLeadId ?? '',
+        tagId: c.tagId ?? '',
+        tagName: c.tag?.name ?? '',
+        agentId: assignedUser?.id ?? '',
         campaign_name: campaignName,
         form_name: 'WSP KRAKE DEV',
         email: c.email ?? '',

@@ -1,18 +1,24 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { isLoggedIn } from '@/lib/api';
+import Landing from '@/widgets/landing/ui/Landing';
 
 export default function Home() {
   const router = useRouter();
+  const [checking, setChecking] = useState(true);
+
   useEffect(() => {
     if (isLoggedIn()) router.replace('/chat');
-    else router.replace('/login');
+    else setChecking(false);
   }, [router]);
-  return (
-    <div style={{ padding: '2rem', textAlign: 'center' }}>
-      Cargando…
-    </div>
-  );
+
+  if (checking) {
+    return (
+      <div style={{ minHeight: '100dvh', background: '#050403' }} />
+    );
+  }
+
+  return <Landing />;
 }

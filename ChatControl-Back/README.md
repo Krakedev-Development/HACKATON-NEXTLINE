@@ -68,6 +68,25 @@ pnpm run start:dev
 
 El servidor backend se levantará en [http://localhost:3001](http://localhost:3001).
 
+## Integración con el CRM de ventas
+
+El código de Nextline sigue llamando `ChatControl` a algunas rutas y pantallas. El backend CRM corre localmente en `http://localhost:3003`; su frontend corre en `http://localhost:4200`.
+
+Variables adicionales en `.env` para la integración:
+
+| Variable | Uso |
+| --- | --- |
+| `CRM_HMAC_SECRET` | Misma clave que `CRM_HMAC_SECRET` del backend CRM; no se expone al frontend. |
+| `ENCRYPTION_MASTER_KEY` | Cifra la API key que Nextline conserva al vincularse. Debe mantenerse estable si ya existe una conexión. |
+| `CRM_BASE_URL` | URL alternativa del backend CRM, sin `/api`; por ejemplo `http://localhost:3003`. La URL guardada al vincular tiene prioridad. |
+
+1. Aplica las migraciones Prisma de este backend en la base de Nextline (`pnpm run prisma:migrate` en desarrollo; usa el flujo de migraciones de tu despliegue en producción). El modelo `CrmIntegration` guarda el código y la conexión por organización.
+2. Habilita CRM para la organización y, con una cuenta `ORG_ADMIN`, abre **Configuración → Integración CRM** en Nextline (`/settings/crm-integration`). Copia el código de vinculación.
+3. En el frontend del CRM abre **Administrador → Integraciones** (`/admin/integraciones`). Pega el código y la URL pública de este backend Nextline, sin `/api` (localmente `http://localhost:3001`). El CRM verifica el código y ambos backends guardan la conexión. El código se regenera al usarlo.
+4. En el CRM asocia los agentes de Nextline con vendedores antes del primer envío. Después, en **Nextline → Informes**, filtra y selecciona contactos y pulsa **Enviar a CRM**. Se envían la etiqueta, el agente y la fecha de registro en lotes de hasta 30. El resultado indica creados, actualizados, duplicados y rechazados. El Excel sigue disponible.
+
+La URL que recibe Nextline para enviar informes proviene de `CRM_PUBLIC_URL` en el backend CRM. En producción debe ser el origen público del **backend** CRM, sin `/api`; si cambia después de vincular, vuelve a vincular para actualizarla. Reenviar un contacto existente actualiza sus datos de Nextline en el CRM y conserva su vendedor.
+
 ---
 
 ## 🌐 Pruebas Locales de Webhooks (WhatsApp/Meta) con Ngrok

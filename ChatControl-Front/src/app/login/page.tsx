@@ -1,9 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import Image from 'next/image';
 import gsap from 'gsap';
+import { useGSAP } from '@gsap/react';
 import { getMe, login, loginLegacy } from '@/lib/api';
 
 type LoginMode = 'email' | 'phone';
@@ -66,6 +68,15 @@ function ArrowIcon() {
   );
 }
 
+function BackArrowIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19 12H5" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="m11 18-6-6 6-6" />
+    </svg>
+  );
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -79,30 +90,22 @@ export default function LoginPage() {
 
   const isPhoneMode = mode === 'phone';
 
-  useEffect(() => {
-    const mm = gsap.matchMedia();
+  useGSAP(() => {
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const desktop = window.matchMedia('(min-width: 900px)').matches;
 
-    mm.add(
-      {
-        reduceMotion: '(prefers-reduced-motion: reduce)',
-        desktop: '(min-width: 900px)',
-      },
-      (context) => {
-        const { reduceMotion, desktop } = context.conditions ?? {};
-        if (reduceMotion) return;
+    if (reduceMotion) {
+      gsap.set('.login-stagger, .login-brand-link, .brand-panel, .auth-panel', { y: 0, x: 0, autoAlpha: 1 });
+      return;
+    }
 
-        const timeline = gsap.timeline({ defaults: { ease: 'power3.out' } });
-        timeline
-          .from('.login-shell', { autoAlpha: 0, duration: 0.45 })
-          .from('.brand-panel', { x: desktop ? -28 : 0, y: desktop ? 0 : 18, autoAlpha: 0, duration: 0.7 }, '-=0.15')
-          .from('.auth-panel', { x: desktop ? 28 : 0, y: desktop ? 0 : 18, autoAlpha: 0, duration: 0.7 }, '-=0.5')
-          .to('.login-stagger', { y: 0, autoAlpha: 1, duration: 0.45, stagger: 0.06 }, '-=0.35');
-      },
-      containerRef,
-    );
-
-    return () => mm.revert();
-  }, []);
+    gsap.timeline({ defaults: { ease: 'power3.out' } })
+      .from('.login-shell', { autoAlpha: 0, duration: 0.45 })
+      .from('.login-brand-link', { y: -10, autoAlpha: 0, duration: 0.5 }, '-=0.2')
+      .from('.brand-panel', { x: desktop ? -28 : 0, y: desktop ? 0 : 18, autoAlpha: 0, duration: 0.7 }, '-=0.25')
+      .from('.auth-panel', { x: desktop ? 28 : 0, y: desktop ? 0 : 18, autoAlpha: 0, duration: 0.7 }, '-=0.5')
+      .to('.login-stagger', { y: 0, autoAlpha: 1, duration: 0.45, stagger: 0.06 }, '-=0.35');
+  }, { scope: containerRef });
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -156,15 +159,21 @@ export default function LoginPage() {
             priority
           />
           <div className="relative flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="login-logo-tile flex h-[52px] w-[52px] items-center justify-center rounded-lg border border-white/15 bg-white/[0.04]">
+            <Link
+              href="/"
+              className="login-brand-link group flex items-center gap-3 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ef4444]"
+            >
+              <div className="login-logo-tile flex h-[52px] w-[52px] items-center justify-center rounded-lg border border-white/15 bg-white/[0.04] transition-transform duration-300 group-hover:-translate-x-0.5">
                 <Image src="/assets/images/NOIRLINE2.png" alt="Nextline" width={34} height={34} className="h-8 w-8 object-contain" priority />
               </div>
               <div>
-                <p className="text-base font-extrabold text-white">Nextline</p>
+                <p className="flex items-center gap-1.5 text-base font-extrabold text-white transition-colors duration-300 group-hover:text-[#ffdad7]" style={{ fontFamily: "'Manrope', sans-serif" }}>
+                  <BackArrowIcon />
+                  Nextline
+                </p>
                 <p className="text-sm text-[#8c8c8c]">ChatControl Console</p>
               </div>
-            </div>
+            </Link>
             <div className="hidden rounded-full border border-[#ef4444]/35 bg-[#ef4444]/10 px-3 py-1.5 text-sm font-semibold text-[#ffdad7] shadow-[0_0_28px_rgba(239,68,68,0.16)] sm:block">
               Online
             </div>
@@ -175,7 +184,10 @@ export default function LoginPage() {
               <span className="h-2 w-2 rounded-full bg-[#ef4444] shadow-[0_0_16px_rgba(239,68,68,0.8)]" />
               Centro operativo para WhatsApp e IA
             </div>
-            <h1 className="max-w-3xl text-5xl font-black leading-[0.9] text-white sm:text-6xl lg:text-7xl">
+            <h1
+              className="max-w-3xl text-5xl font-black leading-[0.9] text-white sm:text-6xl lg:text-7xl"
+              style={{ fontFamily: "'Manrope', sans-serif" }}
+            >
               Control total, respuesta inmediata.
             </h1>
             <p className="mt-6 max-w-2xl text-base leading-7 text-[#d4d4d8] sm:text-lg">
@@ -195,22 +207,28 @@ export default function LoginPage() {
 
         <div className="flex flex-col items-center justify-center px-4 py-6 sm:px-8 lg:px-10 min-h-dvh lg:h-dvh lg:overflow-hidden">
           {/* Logo next to brand visible only on mobile/tablet */}
-          <div className="flex items-center gap-3 mb-6 lg:hidden">
-            <div className="login-logo-tile flex h-10 w-10 items-center justify-center rounded-lg border border-white/15 bg-white/[0.04]">
+          <Link
+            href="/"
+            className="login-brand-link group flex items-center gap-3 mb-6 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ef4444] lg:hidden"
+          >
+            <div className="login-logo-tile flex h-10 w-10 items-center justify-center rounded-lg border border-white/15 bg-white/[0.04] transition-transform duration-300 group-hover:-translate-x-0.5">
               <Image src="/assets/images/NOIRLINE2.png" alt="Nextline" width={24} height={24} className="h-6 w-6 object-contain" priority />
             </div>
             <div>
-              <p className="text-sm font-extrabold text-white">Nextline</p>
+              <p className="flex items-center gap-1.5 text-sm font-extrabold text-white transition-colors duration-300 group-hover:text-[#ffdad7]" style={{ fontFamily: "'Manrope', sans-serif" }}>
+                <BackArrowIcon />
+                Nextline
+              </p>
               <p className="text-xs text-[#8c8c8c]">ChatControl Console</p>
             </div>
-          </div>
+          </Link>
 
           <div className="auth-panel login-gloss-panel relative w-full max-w-[440px] overflow-hidden rounded-lg p-4 sm:p-5 lg:p-6">
             <div className="login-reflection pointer-events-none absolute inset-x-0 top-0 h-24" />
             <div className="login-stagger mb-3.5 sm:mb-4.5 lg:mb-5 flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs sm:text-sm font-semibold text-[#ffdad7]">Acceso seguro</p>
-                <h2 className="mt-1.5 text-2xl sm:text-3xl font-black leading-tight text-white">Bienvenido de vuelta</h2>
+                <h2 className="mt-1.5 text-2xl sm:text-3xl font-black leading-tight text-white" style={{ fontFamily: "'Manrope', sans-serif" }}>Bienvenido de vuelta</h2>
               </div>
               <Image src="/assets/images/krakedev_logo-ByJvfRFA.png" alt="Krakedev" width={72} height={42} className="mt-1 h-auto w-18 object-contain opacity-80" />
             </div>
@@ -295,11 +313,7 @@ export default function LoginPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className="login-stagger group flex min-h-9 sm:min-h-11 w-full items-center justify-between rounded-lg px-4 py-2 sm:py-2.5 text-xs sm:text-sm font-black text-white transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ffdad7] disabled:cursor-wait disabled:opacity-70"
-                style={{
-                  background: 'linear-gradient(135deg, #ff5a5a 0%, #ef4444 38%, #b91a24 100%)',
-                  boxShadow: '0 18px 44px rgba(239, 68, 68, 0.28)',
-                }}
+                className="login-gloss-button login-stagger group flex min-h-9 sm:min-h-11 w-full items-center justify-between rounded-lg px-4 py-2 sm:py-2.5 text-xs sm:text-sm font-black text-white transition-[transform,box-shadow] duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ffdad7] disabled:cursor-wait disabled:opacity-70"
               >
                 <span>{loading ? 'Entrando...' : 'Entrar al panel'}</span>
                 <span className="flex h-8 w-8 items-center justify-center rounded-md bg-white/15 transition-transform group-hover:translate-x-0.5">
