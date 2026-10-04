@@ -58,6 +58,17 @@ pnpm run dev
 
 El frontend estará disponible en [http://localhost:3002](http://localhost:3002).
 
+## Vinculación con el CRM
+
+El backend de Nextline debe estar disponible en `http://localhost:3001` y el CRM local usa backend `http://localhost:3003` y frontend `http://localhost:4200`. `NEXT_PUBLIC_API_URL` apunta al backend Nextline **con** `/api`, como en `.env.local.example`; las claves `CRM_HMAC_SECRET` y `ENCRYPTION_MASTER_KEY` pertenecen solo a los backends.
+
+1. Un administrador de la organización (`ORG_ADMIN`) abre **Configuración → Integración CRM** (`/settings/crm-integration`) y copia el código.
+2. En el CRM, un administrador abre `/admin/integraciones`, pega el código y la URL del backend Nextline **sin** `/api` (`http://localhost:3001` en local). El estado de la conexión se ve en ambas pantallas.
+3. Antes de enviar, en el CRM se asocia cada agente Nextline con el vendedor que recibirá sus contactos nuevos.
+4. En **Informes** (`/informes`) filtra por fecha, etiqueta o agente, selecciona los contactos y pulsa **Enviar a CRM**. La interfaz muestra creados, actualizados, duplicados y rechazados. Se puede repetir el envío: los contactos existentes actualizan sus datos Nextline sin cambiar de vendedor.
+
+En el CRM se comprueba la carga desde **Administrador → Buscador global** (`/admin/search`) filtrando por etiqueta y fechas de Nextline o buscando un teléfono. La exportación a Excel sigue disponible.
+
 ---
 
 ## 📁 Estructura del Directorio

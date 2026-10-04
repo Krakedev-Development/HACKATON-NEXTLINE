@@ -1,4 +1,4 @@
-# ChatControl — MVP Sistema de Chat Profesional
+# Nextline (ChatControl) — WhatsApp y conexión con CRM
 
 Sistema web para responder mensajes de WhatsApp desde una plataforma propia, con respuestas manuales y asistidas por IA (Gemini).
 
@@ -12,10 +12,11 @@ Sistema web para responder mensajes de WhatsApp desde una plataforma propia, con
 
 ## Requisitos
 
-- Node.js 18+
+- Node.js 20+ para ejecutar también los proyectos CRM
 - PostgreSQL (p. ej. Supabase)
 - Cuenta Meta for Developers (WhatsApp Business API)
 - API Key de Google Gemini (Google AI Studio)
+- pnpm para los cuatro proyectos (`backendCRM` y `crm-ventas-clearminds` requieren pnpm 10+)
 
 ## Configuración
 
@@ -26,13 +27,13 @@ cd ChatControl-Back
 cp .env.example .env
 # Editar .env con:
 # - DATABASE_URL (PostgreSQL, ej. Supabase)
-# - JWT_SECRET, APP_LOGIN_PASSWORD
+# - JWT_SECRET (APP_LOGIN_PASSWORD solo si se usa el acceso antiguo)
 # - WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_VERIFY_TOKEN
 # - GEMINI_API_KEY (crear en https://aistudio.google.com/apikey con la misma cuenta Google)
-npm install
-npx prisma generate
-npx prisma migrate dev   # crea tablas Contact, Conversation, Message
-npm run start:dev
+pnpm install
+pnpm run prisma:generate
+pnpm run prisma:migrate
+pnpm run start:dev
 ```
 
 El backend corre en `http://localhost:3001`.
@@ -56,12 +57,39 @@ El backend corre en `http://localhost:3001`.
 ```bash
 cd ChatControl-Front
 cp .env.local.example .env.local
-# Editar .env.local: NEXT_PUBLIC_API_URL=http://localhost:3001
-npm install
-npm run dev
+# Editar .env.local: NEXT_PUBLIC_API_URL=http://localhost:3001/api
+pnpm install
+pnpm run dev
 ```
 
 El frontend corre en `http://localhost:3002`.
+
+### CRM de ventas
+
+Los repositorios del CRM son `backendCRM` (NestJS, puerto local 3003) y `crm-ventas-clearminds` (Angular, puerto local 4200). Instala y ejecuta cada uno con `pnpm`:
+
+```bash
+cd backendCRM
+pnpm install
+pnpm run start:dev
+```
+
+```bash
+cd crm-ventas-clearminds
+pnpm install
+pnpm start
+```
+
+Configura primero el `.env` del backend CRM y la URL de API del frontend CRM según sus README. Antes del primer envío a una base nueva, ejecuta `pnpm run migrate:077` y `pnpm run migrate:078` desde `backendCRM`; el `buildCommand` actual de Vercel no incluye esas dos migraciones.
+
+### Vinculación Nextline → CRM
+
+1. Configura el mismo `CRM_HMAC_SECRET` en los dos backends. El CRM necesita también `CRM_ENCRYPTION_KEY` estable y `CRM_PUBLIC_URL` con el origen de su backend, sin `/api` (en local `http://localhost:3003`). Nextline puede usar `CRM_BASE_URL` como alternativa.
+2. En Nextline, un administrador de la organización abre **Configuración → Integración CRM** (`/settings/crm-integration`) y copia el código.
+3. En el CRM, un administrador abre **Panel → Integraciones** (`/admin/integraciones`), introduce el código y la URL del backend Nextline sin `/api` (en local `http://localhost:3001`) y pulsa **Vincular ChatControl**. La pestaña **Ajustes → Integraciones** solo controla la exportación y tiene un acceso a la pantalla de vinculación.
+4. En la pantalla de integración del CRM, asocia los agentes Nextline con vendedores **antes** del primer envío. En **Nextline → Informes**, filtra y selecciona contactos y pulsa **Enviar a CRM**. El CRM los muestra en **Administrador → Buscador global** (`/admin/search`), con etiqueta, agente y vendedor. Al reenviar un contacto se actualizan sus datos Nextline y se conserva su vendedor.
+
+En producción, ambas URL deben ser públicas y accesibles entre backends. Si cambia `CRM_PUBLIC_URL` después de vincular, vuelve a vincular para actualizar la dirección guardada en Nextline. La exportación e importación por Excel siguen disponibles.
 
 ### WhatsApp Webhook
 
@@ -70,7 +98,7 @@ Para que los mensajes enviados desde WhatsApp aparezcan en la app:
 1. **El backend debe ser accesible desde internet.** En local, usa [ngrok](https://ngrok.com) (ej. `ngrok http 3001`) y usa la URL pública como `TU_DOMINIO`.  
    **Instalar ngrok en Windows:** `winget install ngrok.ngrok` o desde [Microsoft Store](https://apps.microsoft.com/detail/ngrok/9n4svt4f5g9p), o descargar en [ngrok.com/download](https://ngrok.com/download). Luego ejecuta `ngrok config add-authtoken TU_TOKEN` (token gratuito en ngrok.com).
 2. En Meta for Developers, configurar la URL del webhook:
-   - **URL de devolución de llamada (Callback URL):** debe incluir la ruta del endpoint: `https://TU_DOMINIO/whatsapp/webhook` (ej. `https://biflex-lumpier-emanuel.ngrok-free.dev/whatsapp/webhook`). No uses solo el dominio.
+   - **URL de devolución de llamada (Callback URL):** debe incluir la ruta del endpoint: `https://TU_DOMINIO/api/whatsapp/webhook`. No uses solo el dominio.
    - **Token de verificación:** exactamente el mismo valor que `WHATSAPP_VERIFY_TOKEN` en `.env` del backend.
 3. **Suscribirse al campo "messages"** en "Campos del webhook" para que Meta envíe los mensajes entrantes.
 4. **Enviar mensajes (app en desarrollo):** Si aparece "Application does not have permission for this action", en Meta for Developers → tu app → **Roles** (o **WhatsApp** → **Números de teléfono**) añade tu número personal como **número de prueba** para poder enviar mensajes desde la app.
@@ -78,7 +106,7 @@ Para que los mensajes enviados desde WhatsApp aparezcan en la app:
 
 ## Uso
 
-1. **Login:** Número de teléfono + contraseña fija definida en `APP_LOGIN_PASSWORD` (backend).
+1. **Login:** Usuario de la organización con las credenciales configuradas en Nextline. `APP_LOGIN_PASSWORD` corresponde solo al endpoint de acceso antiguo.
 2. **Conversaciones:** Se listan las conversaciones (los mensajes entrantes se registran vía webhook).
 3. **Ventana 24h:** Solo se pueden enviar mensajes libres si el usuario escribió en las últimas 24 horas. La UI indica si está dentro o fuera de la ventana.
 4. **Acciones por mensaje:**
