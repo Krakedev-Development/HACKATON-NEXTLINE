@@ -11,6 +11,10 @@ import {
   exportContacts,
   getOrgUsers,
   getAgentContactMap,
+  getTags,
+  getCrmStatus,
+  sendReportToCrm,
+  type Tag,
   type ContactItem,
   type MeResponse,
 } from '@/lib/api';
@@ -127,7 +131,7 @@ function CloseIcon() {
   );
 }
 
-type ColumnKey = 'date' | 'form' | 'email' | 'name' | 'phone' | 'agent';
+type ColumnKey = 'date' | 'form' | 'email' | 'name' | 'phone' | 'agent' | 'platform' | 'tag' | 'tagId' | 'contactId' | 'crmLeadId' | 'agentId';
 
 const COLUMNS: Array<{ key: ColumnKey; label: string; desc: string; icon: React.ReactElement }> = [
   { key: 'date', label: 'Fecha', desc: 'Fecha de registro', icon: <CalendarIcon /> },
@@ -136,15 +140,27 @@ const COLUMNS: Array<{ key: ColumnKey; label: string; desc: string; icon: React.
   { key: 'name', label: 'Nombre', desc: 'Nombre registrado', icon: <UserIcon /> },
   { key: 'phone', label: 'Teléfono', desc: 'Número WhatsApp', icon: <PhoneIcon /> },
   { key: 'agent', label: 'Agente', desc: 'Agente asignado', icon: <AgentIcon /> },
+  { key: 'platform', label: 'Plataforma', desc: 'Origen Nextline', icon: <FormIcon /> },
+  { key: 'tag', label: 'Etiqueta', desc: 'Etiqueta actual', icon: <InfoIcon /> },
+  { key: 'tagId', label: 'ID etiqueta', desc: 'Identificador de etiqueta', icon: <InfoIcon /> },
+  { key: 'contactId', label: 'ID contacto Nextline', desc: 'Identificador del contacto', icon: <UserIcon /> },
+  { key: 'crmLeadId', label: 'ID lead CRM', desc: 'Lead vinculado al CRM', icon: <UserIcon /> },
+  { key: 'agentId', label: 'ID agente Nextline', desc: 'Identificador del agente', icon: <AgentIcon /> },
 ];
 
-const COLUMN_EXPORT_MAP: Record<ColumnKey, { header: string; width: number; value: (r: { form_name: string; email: string; name: string; phone: string; agent: string; createdAt: number }) => string }> = {
-  date: { header: 'Fecha de Registro', width: 18, value: (r) => new Date(r.createdAt).toLocaleDateString() },
+const COLUMN_EXPORT_MAP: Record<ColumnKey, { header: string; width: number; value: (r: { form_name: string; email: string; name: string; phone: string; agent: string; createdAt: number; contactId: string; crmLeadId: string; tagId: string; tagName: string; agentId: string }) => string }> = {
+  date: { header: 'Fecha de Registro', width: 24, value: (r) => new Date(r.createdAt).toISOString() },
   form: { header: 'Formulario', width: 20, value: (r) => r.form_name },
   email: { header: 'Correo Electrónico', width: 30, value: (r) => r.email },
   name: { header: 'Nombre', width: 25, value: (r) => r.name },
   phone: { header: 'Número de Teléfono', width: 20, value: (r) => r.phone },
   agent: { header: 'Agente', width: 25, value: (r) => r.agent },
+  platform: { header: 'Plataforma', width: 16, value: () => 'Nextline' },
+  tag: { header: 'Etiqueta', width: 25, value: (r) => r.tagName },
+  tagId: { header: 'ID etiqueta Nextline', width: 28, value: (r) => r.tagId },
+  contactId: { header: 'ID contacto Nextline', width: 28, value: (r) => r.contactId },
+  crmLeadId: { header: 'ID lead CRM', width: 28, value: (r) => r.crmLeadId },
+  agentId: { header: 'ID agente Nextline', width: 28, value: (r) => r.agentId },
 };
 
 // ── Main Page ──────────────────────────────────────────
@@ -167,6 +183,11 @@ export default function InformesPage() {
   const [exporting, setExporting] = useState(false);
   const [exportSuccess, setExportSuccess] = useState(false);
   const [exportError, setExportError] = useState('');
+  const [crmConnected, setCrmConnected] = useState(false);
+  const [sendingToCrm, setSendingToCrm] = useState(false);
+  const [sendProgress, setSendProgress] = useState(0);
+  const [sendError, setSendError] = useState('');
+  const [sendResult, setSendResult] = useState<{ created: number; updated: number; duplicates: number; rejected: number } | null>(null);
 
   const [agents, setAgents] = useState<Array<{ id: string; email: string; displayName: string | null }>>([]);
   const [selectedAgentIds, setSelectedAgentIds] = useState<Set<string>>(new Set());
@@ -175,9 +196,11 @@ export default function InformesPage() {
 
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [tags, setTags] = useState<Tag[]>([]);
+  const [selectedTagId, setSelectedTagId] = useState('');
 
   const [selectedColumns, setSelectedColumns] = useState<Set<ColumnKey>>(
-    new Set<ColumnKey>(['date', 'form', 'email', 'name', 'phone', 'agent'])
+    new Set<ColumnKey>(['date', 'form', 'email', 'name', 'phone', 'agent', 'platform', 'tag', 'tagId', 'contactId', 'crmLeadId', 'agentId'])
   );
 
   const filteredAgents = agents.filter(a =>
@@ -195,15 +218,27 @@ export default function InformesPage() {
   }, [searchQuery]);
 
   useEffect(() => {
+    setSelectedIds(new Set());
+  }, [debouncedQuery, dateFrom, dateTo, selectedTagId]);
+
+  useEffect(() => {
+    setSendResult(null);
+    setSendError('');
+  }, [selectedIds]);
+
+  useEffect(() => {
     if (!mounted) return;
     if (!isLoggedIn()) { router.replace('/login'); return; }
     (async () => {
       try {
         const meData = await getMe();
         setMe(meData);
+        setTags(await getTags());
 
         // Filtro por agente: solo tiene sentido para ORG_ADMIN (un agente ya ve solo lo suyo)
         if (meData.role === 'ORG_ADMIN') {
+          const status = await getCrmStatus().catch(() => null);
+          setCrmConnected(Boolean(status?.connected));
           const orgUsers = await getOrgUsers();
           const agentUsers = orgUsers.filter(u => u.role === 'AGENT');
           setAgents(agentUsers);
@@ -225,12 +260,12 @@ export default function InformesPage() {
     })();
   }, [agents, dateFrom, dateTo]);
 
-  async function loadFirstPage(q: string, agentIds: string[], from: string, to: string) {
+  async function loadFirstPage(q: string, agentIds: string[], from: string, to: string, tagId: string) {
     setLoading(true);
     try {
       const [page, ids] = await Promise.all([
-        getContactsList({ q, agentIds, dateFrom: from, dateTo: to, limit: PAGE_SIZE }),
-        getContactIds({ q, agentIds, dateFrom: from, dateTo: to }),
+        getContactsList({ q, agentIds, tagIds: tagId ? [tagId] : undefined, dateFrom: from, dateTo: to, limit: PAGE_SIZE }),
+        getContactIds({ q, agentIds, tagIds: tagId ? [tagId] : undefined, dateFrom: from, dateTo: to }),
       ]);
       setContacts(page.contacts);
       setNextCursor(page.nextCursor);
@@ -243,7 +278,7 @@ export default function InformesPage() {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
     try {
-      const page = await getContactsList({ q: debouncedQuery, agentIds: Array.from(selectedAgentIds), dateFrom, dateTo, limit: PAGE_SIZE, cursor: nextCursor });
+      const page = await getContactsList({ q: debouncedQuery, agentIds: Array.from(selectedAgentIds), tagIds: selectedTagId ? [selectedTagId] : undefined, dateFrom, dateTo, limit: PAGE_SIZE, cursor: nextCursor });
       setContacts(prev => [...prev, ...page.contacts]);
       setNextCursor(page.nextCursor);
       setTotal(page.total);
@@ -252,8 +287,8 @@ export default function InformesPage() {
 
   useEffect(() => {
     if (!mounted || !isLoggedIn()) return;
-    loadFirstPage(debouncedQuery, Array.from(selectedAgentIds), dateFrom, dateTo);
-  }, [mounted, debouncedQuery, selectedAgentIds, dateFrom, dateTo]);
+    loadFirstPage(debouncedQuery, Array.from(selectedAgentIds), dateFrom, dateTo, selectedTagId);
+  }, [mounted, debouncedQuery, selectedAgentIds, dateFrom, dateTo, selectedTagId]);
 
   function handleListScroll(e: React.UIEvent<HTMLDivElement>) {
     const el = e.currentTarget;
@@ -345,6 +380,34 @@ export default function InformesPage() {
     }
   };
 
+  const handleSendToCrm = async () => {
+    if (!selectedIds.size || sendingToCrm) return;
+    setSendingToCrm(true);
+    setSendError('');
+    setSendResult(null);
+    setSendProgress(0);
+    const ids = Array.from(selectedIds);
+    const totals = { created: 0, updated: 0, duplicates: 0, rejected: 0 };
+    let processed = 0;
+    try {
+      for (let start = 0; start < ids.length; start += 30) {
+        const result = await sendReportToCrm(ids.slice(start, start + 30));
+        totals.created += result.created;
+        totals.updated += result.updated;
+        totals.duplicates += result.duplicates;
+        totals.rejected += result.rejected;
+        processed = Math.min(start + 30, ids.length);
+        setSendProgress(processed);
+      }
+      setSendResult(totals);
+    } catch (error) {
+      setSendResult(processed ? totals : null);
+      setSendError(`${processed} de ${ids.length} contactos procesados. ${error instanceof Error ? error.message : 'No se pudo enviar el informe al CRM.'}`);
+    } finally {
+      setSendingToCrm(false);
+    }
+  };
+
   if (!mounted) return null;
 
   return (
@@ -433,6 +496,15 @@ export default function InformesPage() {
                 />
               </div>
             </div>
+          </div>
+
+          {/* Agent filter (solo ORG_ADMIN) */}
+          <div style={{ marginTop: '0.75rem', padding: '0.65rem 0.75rem', background: 'rgba(255,255,255,0.02)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.05)' }}>
+            <label htmlFor="report-tag" style={{ display: 'block', fontSize: '0.65rem', color: '#555', fontWeight: 800, textTransform: 'uppercase', marginBottom: '0.5rem' }}>Etiqueta</label>
+            <select id="report-tag" value={selectedTagId} onChange={(e) => { setSelectedTagId(e.target.value); setSelectedIds(new Set()); }} style={{ width: '100%', background: '#111', color: '#F2F2F2', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '0.5rem' }}>
+              <option value="">Todas las etiquetas</option>
+              {tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.name} ({tag.contactCount})</option>)}
+            </select>
           </div>
 
           {/* Agent filter (solo ORG_ADMIN) */}
@@ -548,11 +620,38 @@ export default function InformesPage() {
             <div>
               <h1 style={{ fontSize: '2rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '-0.02em', margin: 0 }}>Informes</h1>
               <p style={{ margin: '0.25rem 0 0', color: '#555', fontSize: '0.88rem' }}>
-                Exporta un reporte en Excel con los contactos seleccionados.
+                Selecciona contactos para enviarlos al CRM o descargar un reporte en Excel.
               </p>
             </div>
           </div>
         </header>
+
+        {me?.role === 'ORG_ADMIN' && (
+          <div style={{ background: '#080808', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 24, padding: '1.5rem 2rem', marginBottom: '1.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
+              <div>
+                <h2 style={{ color: 'white', fontSize: '1.1rem', margin: '0 0 0.35rem' }}>Enviar a CRM</h2>
+                <p style={{ color: '#888', fontSize: '0.82rem', margin: 0 }}>
+                  {crmConnected
+                    ? `${selectedIds.size} contactos seleccionados. Se enviarán sus etiquetas, agentes y fechas de registro.`
+                    : 'Vincula el CRM desde Integraciones para habilitar el envío.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleSendToCrm}
+                disabled={!crmConnected || !selectedIds.size || sendingToCrm}
+                style={{ padding: '0.85rem 1.4rem', border: 0, borderRadius: 12, fontWeight: 800, color: 'white', background: '#C52929', opacity: !crmConnected || !selectedIds.size || sendingToCrm ? 0.4 : 1, cursor: !crmConnected || !selectedIds.size || sendingToCrm ? 'not-allowed' : 'pointer' }}
+              >
+                {sendingToCrm ? `Enviando ${sendProgress}/${selectedIds.size}...` : 'Enviar a CRM'}
+              </button>
+            </div>
+            {sendResult && <p role="status" style={{ color: '#22C55E', marginBottom: 0, fontSize: '0.85rem' }}>
+              CRM: {sendResult.created} creados, {sendResult.updated} actualizados, {sendResult.duplicates} duplicados, {sendResult.rejected} rechazados.
+            </p>}
+            {sendError && <p role="alert" style={{ color: '#EF4444', marginBottom: 0, fontSize: '0.85rem' }}>{sendError}</p>}
+          </div>
+        )}
 
         {/* Export card */}
         <div style={{ background: '#080808', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '24px', padding: '2.5rem', marginBottom: '1.5rem' }}>
@@ -567,6 +666,9 @@ export default function InformesPage() {
                   : selectedColumns.size === 0
                     ? 'Selecciona al menos una columna para exportar.'
                     : `${selectedIds.size} contacto${selectedIds.size > 1 ? 's' : ''} listo${selectedIds.size > 1 ? 's' : ''} para exportar.`}
+              </p>
+              <p style={{ margin: '0.5rem 0 0', color: '#777', fontSize: '0.75rem' }}>
+                El Excel conserva los campos de Nextline para consultas o importaciones manuales.
               </p>
             </div>
 

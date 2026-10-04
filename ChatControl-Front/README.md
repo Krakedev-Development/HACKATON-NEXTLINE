@@ -56,7 +56,7 @@ pnpm install
 pnpm run dev
 ```
 
-El frontend estará disponible en [http://localhost:3000](http://localhost:3000).
+El frontend estará disponible en [http://localhost:3002](http://localhost:3002).
 
 ---
 

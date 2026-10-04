@@ -127,6 +127,13 @@
 
   .login-stat-card {
     backdrop-filter: blur(18px);
+    transition: transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1), border-color 0.35s ease;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .login-stat-card:hover {
+      transform: translateY(-3px);
+      border-color: rgba(239, 68, 68, 0.35);
+    }
   }
 
   .login-gloss-panel {
@@ -208,6 +215,105 @@
   .login-stagger {
     opacity: 0;
     transform: translateY(14px);
+  }
+
+  /* ============================================================
+     LANDING (/) — home pública, mismo lenguaje visual que /login
+     ============================================================ */
+  .landing-loader-bg {
+    background: radial-gradient(circle at 50% 40%, #0d0d0d 0%, #050403 70%);
+  }
+
+  .landing-watermark {
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1;
+    color: rgba(255, 255, 255, 0.04);
+    -webkit-text-stroke: 1px rgba(239, 68, 68, 0.05);
+  }
+
+  .landing-glow {
+    background: radial-gradient(circle, rgba(239, 68, 68, 0.16) 0%, transparent 65%);
+    filter: blur(20px);
+  }
+
+  .landing-ink-card {
+    background: linear-gradient(160deg, #0a0a09 0%, #121010 100%);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .landing-ink-card::before {
+    content: '';
+    position: absolute;
+    inset: -40%;
+    background: radial-gradient(circle at 70% 20%, rgba(239, 68, 68, 0.14), transparent 60%);
+    pointer-events: none;
+  }
+
+  .landing-stagger {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+
+  .landing-nav-item {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+
+  .landing-line-mask {
+    overflow: hidden;
+    display: block;
+  }
+  .landing-line-inner {
+    display: block;
+    transform: translateY(112%);
+    opacity: 0;
+    transition: transform 0.9s cubic-bezier(0.215, 0.61, 0.355, 1), opacity 0.9s cubic-bezier(0.215, 0.61, 0.355, 1);
+  }
+  .landing-reveal-lines.is-visible .landing-line-inner {
+    transform: translateY(0);
+    opacity: 1;
+  }
+
+  .landing-word-mask {
+    display: inline-block;
+    overflow: hidden;
+    vertical-align: top;
+  }
+  .landing-word-inner {
+    display: inline-block;
+    transform: translateY(24px);
+    opacity: 0;
+    transition: transform 0.7s cubic-bezier(0.165, 0.84, 0.44, 1), opacity 0.7s cubic-bezier(0.165, 0.84, 0.44, 1);
+  }
+  .landing-reveal-words.is-visible .landing-word-inner {
+    transform: translateY(0);
+    opacity: 1;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .landing-line-inner,
+    .landing-word-inner {
+      transition: none;
+    }
+  }
+
+  .landing-band-tile {
+    transition: transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .landing-band-tile:hover {
+      transform: scale(1.03);
+    }
+  }
+
+  .landing-service-row {
+    transition: background 0.3s ease, padding-inline 0.3s ease;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .landing-service-row:hover {
+      background: rgba(20, 18, 17, 0.9);
+    }
   }
 
   .glass-panel {

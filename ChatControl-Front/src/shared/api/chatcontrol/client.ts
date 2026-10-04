@@ -431,24 +431,26 @@ export interface ContactsPage {
   total: number;
 }
 
-export async function getContactsList(params?: { cursor?: string; limit?: number; q?: string; campaignIds?: string[]; agentIds?: string[]; dateFrom?: string; dateTo?: string }): Promise<ContactsPage> {
+export async function getContactsList(params?: { cursor?: string; limit?: number; q?: string; campaignIds?: string[]; agentIds?: string[]; tagIds?: string[]; dateFrom?: string; dateTo?: string }): Promise<ContactsPage> {
   const qs = new URLSearchParams();
   if (params?.cursor) qs.set('cursor', params.cursor);
   if (params?.limit) qs.set('limit', String(params.limit));
   if (params?.q?.trim()) qs.set('q', params.q.trim());
   if (params?.campaignIds?.length) qs.set('campaignIds', params.campaignIds.join(','));
   if (params?.agentIds?.length) qs.set('agentIds', params.agentIds.join(','));
+  if (params?.tagIds?.length) qs.set('tagIds', params.tagIds.join(','));
   if (params?.dateFrom) qs.set('dateFrom', params.dateFrom);
   if (params?.dateTo) qs.set('dateTo', params.dateTo);
   const query = qs.toString();
   return api<ContactsPage>(`/contacts${query ? `?${query}` : ''}`);
 }
 
-export async function getContactIds(params?: { q?: string; campaignIds?: string[]; agentIds?: string[]; dateFrom?: string; dateTo?: string }): Promise<string[]> {
+export async function getContactIds(params?: { q?: string; campaignIds?: string[]; agentIds?: string[]; tagIds?: string[]; dateFrom?: string; dateTo?: string }): Promise<string[]> {
   const qs = new URLSearchParams();
   if (params?.q?.trim()) qs.set('q', params.q.trim());
   if (params?.campaignIds?.length) qs.set('campaignIds', params.campaignIds.join(','));
   if (params?.agentIds?.length) qs.set('agentIds', params.agentIds.join(','));
+  if (params?.tagIds?.length) qs.set('tagIds', params.tagIds.join(','));
   if (params?.dateFrom) qs.set('dateFrom', params.dateFrom);
   if (params?.dateTo) qs.set('dateTo', params.dateTo);
   const query = qs.toString();
@@ -936,6 +938,22 @@ export async function getCrmStatus(): Promise<CrmIntegrationStatus> {
   return api('/crm-integrations/status');
 }
 
+export interface SendReportToCrmResult {
+  ok: boolean;
+  created: number;
+  updated: number;
+  duplicates: number;
+  rejected: number;
+  errors: Array<{ phoneNumber?: string; error?: string }>;
+}
+
+export async function sendReportToCrm(contactIds: string[]): Promise<SendReportToCrmResult> {
+  return api('/crm-integrations/reports/send-to-crm', {
+    method: 'POST',
+    body: JSON.stringify({ contactIds }),
+  });
+}
+
 export async function getCrmAuditLogs(): Promise<{
   logs: Array<{
     id: string;
@@ -1113,6 +1131,11 @@ export async function previewByTags(tagIds: string[]): Promise<BroadcastListPrev
 }
 
 export interface ExportContactRow {
+  contactId: string;
+  crmLeadId: string;
+  tagId: string;
+  tagName: string;
+  agentId: string;
   campaign_name: string;
   form_name: string;
   email: string;

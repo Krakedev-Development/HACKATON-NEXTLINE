@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { SecretsCryptoService } from '../common/secrets-crypto.service';
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import { ContactsService } from '../contacts/contacts.service';
 
 export interface CrmConnectionDto {
   organizationId: string;
@@ -78,7 +79,7 @@ export class CrmIntegrationsService implements OnModuleInit {
   }
 
   generateCodigoVinculacion(): string {
-    const raw = randomBytes(4).toString('hex').toUpperCase();
+    const raw = randomBytes(6).toString('hex').toUpperCase();
     return `CRM-${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}`;
   }
 
@@ -142,15 +143,98 @@ export class CrmIntegrationsService implements OnModuleInit {
     return { organizationId: integration.organizationId, crmUrl: integration.crmUrl };
   }
 
+  async sendReportToCrm(
+    organizationId: string,
+    rows: Awaited<ReturnType<ContactsService['exportContacts']>>,
+  ): Promise<{ ok: true; created: number; updated: number; duplicates: number; rejected: number; errors: unknown[] }> {
+    const integration = await this.prisma.crmIntegration.findUnique({ where: { organizationId } });
+    if (!integration?.isActive || !integration.apiKeyEncrypted) {
+      throw new BadRequestException('Vincule el CRM desde Integraciones antes de enviar el informe');
+    }
+    const crmUrl = integration.crmUrl || this.config.get<string>('CRM_BASE_URL');
+    if (!crmUrl) {
+      throw new BadRequestException('Falta la URL del CRM. Vuelva a vincular el CRM desde Integraciones');
+    }
+    let url: URL;
+    try {
+      url = new URL('/api/integrations/chatcontrol/import-nextline', crmUrl);
+      if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname))) {
+        throw new Error('Protocolo no permitido');
+      }
+    } catch {
+      throw new BadRequestException('La URL del CRM vinculada no es válida');
+    }
+    const valid = rows.filter((row) => {
+      const digits = row.phone.replace(/\D/g, '');
+      return digits.length >= 8 && digits.length <= 15;
+    });
+    const rejected = rows.length - valid.length;
+    if (!valid.length) {
+      return { ok: true, created: 0, updated: 0, duplicates: 0, rejected, errors: [] };
+    }
+    const payload = {
+      leads: valid.map((row) => ({
+        createdTime: new Date(row.createdAt).toISOString(),
+        formName: row.form_name,
+        platform: 'Nextline',
+        fullName: row.name || row.phone,
+        phoneNumber: row.phone,
+        email: row.email || undefined,
+        campaignName: row.campaign_name,
+        nextlineContactId: row.contactId,
+        crmLeadId: row.crmLeadId || undefined,
+        nextlineTagId: row.tagId || null,
+        nextlineTagName: row.tagName || null,
+        nextlineAgentId: row.agentId || null,
+        nextlineAgentName: row.agent === 'Sin asignar' ? null : row.agent,
+        nextlineRegisteredAt: new Date(row.createdAt).toISOString(),
+      })),
+    };
+    const timestamp = String(Date.now());
+    const apiKey = this.crypto.decrypt(integration.apiKeyEncrypted);
+    const signature = createHmac('sha256', apiKey)
+      .update(`${timestamp}.${JSON.stringify(payload)}`)
+      .digest('hex');
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-nextline-timestamp': timestamp,
+          'x-nextline-signature': signature,
+        },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(25_000),
+        redirect: 'error',
+      });
+    } catch {
+      throw new BadRequestException('No se pudo conectar con el CRM configurado');
+    }
+    const result = await response.json().catch(() => null);
+    if (!response.ok || !result?.ok) {
+      throw new BadRequestException(result?.message || 'El CRM rechazó el envío');
+    }
+    return {
+      ok: true,
+      created: result.created || 0,
+      updated: result.updated || 0,
+      duplicates: result.duplicates || 0,
+      rejected,
+      errors: result.errors || [],
+    };
+  }
+
   async checkUser(
     email: string,
+    organizationId?: string,
   ): Promise<{ exists: boolean; user?: { email: string; displayName: string; organizationName: string; role: string } }> {
     const normalized = email.trim().toLowerCase();
     const user = await this.prisma.user.findUnique({
       where: { email: normalized },
       include: { organization: { select: { name: true, id: true } } },
     });
-    if (!user) return { exists: false };
+    if (!user || (organizationId && user.organizationId !== organizationId)) return { exists: false };
     return {
       exists: true,
       user: {

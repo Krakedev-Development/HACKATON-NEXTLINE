@@ -26,6 +26,7 @@ export class ContactsController {
     @Query('agentIds') agentIds?: string,
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
+    @Query('tagIds') tagIds?: string,
   ) {
     return this.contacts.findAll(
       user.organizationId!,
@@ -37,6 +38,7 @@ export class ContactsController {
         agentIds: agentIds ? agentIds.split(',').filter(Boolean) : undefined,
         dateFrom,
         dateTo,
+        tagIds: tagIds ? tagIds.split(',').filter(Boolean) : undefined,
       },
       cursor,
       limit ? parseInt(limit, 10) : undefined,
@@ -51,6 +53,7 @@ export class ContactsController {
     @Query('agentIds') agentIds?: string,
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
+    @Query('tagIds') tagIds?: string,
   ) {
     const ids = await this.contacts.findAllIds(user.organizationId!, user.userId, user.role, {
       q,
@@ -58,6 +61,7 @@ export class ContactsController {
       agentIds: agentIds ? agentIds.split(',').filter(Boolean) : undefined,
       dateFrom,
       dateTo,
+      tagIds: tagIds ? tagIds.split(',').filter(Boolean) : undefined,
     });
     return { ids };
   }

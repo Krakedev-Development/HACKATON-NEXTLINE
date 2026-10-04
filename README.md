@@ -61,7 +61,7 @@ npm install
 npm run dev
 ```
 
-El frontend corre en `http://localhost:3000`.
+El frontend corre en `http://localhost:3002`.
 
 ### WhatsApp Webhook
 
