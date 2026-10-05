@@ -10,7 +10,7 @@ import { SettingsService } from '../settings/settings.service';
 import { TemplatesService } from '../templates/templates.service';
 import { ChatGateway } from '../chat/chat.gateway';
 import { StorageService } from '../common/storage.service';
-import { ensureWhatsAppCompatibleVideo, withMp4Extension } from '../common/video-transcode.util';
+import { ensureWhatsAppCompatibleVideo, withMp4Extension, WHATSAPP_VIDEO_MAX_BYTES } from '../common/video-transcode.util';
 import {
   classifyWhatsAppFailure,
   FAILURE_CATEGORY_FILTER_LABELS,
@@ -88,6 +88,12 @@ export class BroadcastService {
     templateId?: string,
   ): Promise<string> {
     const { buffer, mimetype, transcoded } = await ensureWhatsAppCompatibleVideo(file.buffer, file.mimetype);
+    if (mimetype.startsWith('video/') && buffer.length > WHATSAPP_VIDEO_MAX_BYTES) {
+      throw new BadRequestException(
+        `El video pesa ${(buffer.length / 1024 / 1024).toFixed(1)}MB incluso tras comprimirlo; ` +
+          'WhatsApp no permite enviar videos de más de 16MB. Probá con un archivo más corto o de menor resolución.',
+      );
+    }
     const originalname = transcoded ? withMp4Extension(file.originalname) : file.originalname;
     const timestamp = Date.now();
     const path = `broadcast/${organizationId}/${timestamp}_${originalname}`;
@@ -555,14 +561,18 @@ export class BroadcastService {
     this.gateway.emitBroadcastCompleted(organizationId, { sent, failed, errors });
   }
 
-  /** Cuenta mensajes salientes marcados como FAILED (vía webhook de estado) en la ventana reciente,
-   * para frenar un envío masivo si Meta ya está rechazando por spam antes de quemar el resto de la lista. */
+  /** Cuenta mensajes salientes rechazados específicamente por límite de spam (código 131048/131049
+   * de Meta, vía webhook de estado) en la ventana reciente, para frenar un envío masivo si Meta ya
+   * está bloqueando por spam antes de quemar el resto de la lista. Solo cuenta esa categoría —no
+   * cualquier FAILED— para que una ráfaga de fallos por otra causa (ej. un archivo de media
+   * incompatible) no se frene y se etiquete como "spam" sin serlo. */
   private async recentSpamFailureCount(organizationId: string): Promise<number> {
     const since = new Date(Date.now() - CIRCUIT_BREAKER_WINDOW_MS);
     return this.prisma.message.count({
       where: {
         direction: MessageDirection.OUT,
         status: MessageStatus.FAILED,
+        errorCategory: 'SPAM_BLOCKED' satisfies BroadcastFailureCategory,
         whatsappTimestamp: { gte: since },
         conversation: { contact: { organizationId } },
       },
