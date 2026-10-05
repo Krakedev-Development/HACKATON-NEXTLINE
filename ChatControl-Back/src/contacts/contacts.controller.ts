@@ -27,6 +27,7 @@ export class ContactsController {
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
     @Query('tagIds') tagIds?: string,
+    @Query('interestStatus') interestStatus?: string,
   ) {
     return this.contacts.findAll(
       user.organizationId!,
@@ -39,6 +40,7 @@ export class ContactsController {
         dateFrom,
         dateTo,
         tagIds: tagIds ? tagIds.split(',').filter(Boolean) : undefined,
+        interestStatus,
       },
       cursor,
       limit ? parseInt(limit, 10) : undefined,
@@ -54,6 +56,7 @@ export class ContactsController {
     @Query('dateFrom') dateFrom?: string,
     @Query('dateTo') dateTo?: string,
     @Query('tagIds') tagIds?: string,
+    @Query('interestStatus') interestStatus?: string,
   ) {
     const ids = await this.contacts.findAllIds(user.organizationId!, user.userId, user.role, {
       q,
@@ -62,6 +65,7 @@ export class ContactsController {
       dateFrom,
       dateTo,
       tagIds: tagIds ? tagIds.split(',').filter(Boolean) : undefined,
+      interestStatus,
     });
     return { ids };
   }
@@ -143,13 +147,14 @@ export class ContactsController {
   @Roles(UserRole.ORG_ADMIN)
   async getAgentContacts(
     @CurrentUser() user: AuthUser,
-    @Body() body: { agentIds: string[]; dateFrom?: string; dateTo?: string },
+    @Body() body: { agentIds: string[]; dateFrom?: string; dateTo?: string; interestStatus?: string },
   ) {
     const map = await this.contacts.getAgentContactMap(
       user.organizationId!,
       body.agentIds || [],
       body.dateFrom,
       body.dateTo,
+      body.interestStatus,
     );
     return { ok: true, byAgent: map };
   }

@@ -161,6 +161,17 @@ export class BroadcastService {
     return new Set(contacts.map((c) => c.id));
   }
 
+  private async getInterestContactIdSet(organizationId: string, interestStatus?: string): Promise<Set<string> | null> {
+    if (!interestStatus) return null;
+    const status = interestStatus === 'UNANSWERED' ? null : interestStatus;
+    if (status !== null && status !== 'INTERESTED' && status !== 'NOT_INTERESTED') return null;
+    const contacts = await this.prisma.contact.findMany({
+      where: { organizationId, interestStatus: status },
+      select: { id: true },
+    });
+    return new Set(contacts.map((contact) => contact.id));
+  }
+
   /**
    * Lista completa (sin paginar) de contactos de broadcast. Uso interno para envíos y validaciones.
    * `getContacts`/`getAllContactIds` la llaman en paralelo (una vez para la página, otra para los
@@ -206,19 +217,21 @@ export class BroadcastService {
     organizationId: string,
     userId?: string,
     userRole?: string,
-    filter?: { q?: string; campaignIds?: string[]; tagIds?: string[] },
+    filter?: { q?: string; campaignIds?: string[]; tagIds?: string[]; interestStatus?: string },
     cursor?: string,
     limit?: number,
   ): Promise<{ contacts: BroadcastContact[]; nextCursor: string | null; total: number }> {
-    const [list, campaignContactIds, tagContactIds] = await Promise.all([
+    const [list, campaignContactIds, tagContactIds, interestContactIds] = await Promise.all([
       this.getAllContacts(organizationId, userId, userRole),
       this.getCampaignContactIdSet(organizationId, filter?.campaignIds),
       this.getTagContactIdSet(organizationId, filter?.tagIds),
+      this.getInterestContactIdSet(organizationId, filter?.interestStatus),
     ]);
     const matching = list
       .filter((c) => this.matchesQuery(c, filter?.q))
       .filter((c) => !campaignContactIds || campaignContactIds.has(c.contactId))
-      .filter((c) => !tagContactIds || tagContactIds.has(c.contactId));
+      .filter((c) => !tagContactIds || tagContactIds.has(c.contactId))
+      .filter((c) => !interestContactIds || interestContactIds.has(c.contactId));
 
     const take = limit && limit > 0 ? Math.min(limit, 200) : 50;
     let startIndex = 0;
@@ -236,18 +249,20 @@ export class BroadcastService {
     organizationId: string,
     userId?: string,
     userRole?: string,
-    filter?: { q?: string; onlyCanSend?: boolean; campaignIds?: string[]; tagIds?: string[] },
+    filter?: { q?: string; onlyCanSend?: boolean; campaignIds?: string[]; tagIds?: string[]; interestStatus?: string },
   ): Promise<string[]> {
-    const [list, campaignContactIds, tagContactIds] = await Promise.all([
+    const [list, campaignContactIds, tagContactIds, interestContactIds] = await Promise.all([
       this.getAllContacts(organizationId, userId, userRole),
       this.getCampaignContactIdSet(organizationId, filter?.campaignIds),
       this.getTagContactIdSet(organizationId, filter?.tagIds),
+      this.getInterestContactIdSet(organizationId, filter?.interestStatus),
     ]);
     return list
       .filter((c) => this.matchesQuery(c, filter?.q))
       .filter((c) => !filter?.onlyCanSend || c.canSend)
       .filter((c) => !campaignContactIds || campaignContactIds.has(c.contactId))
       .filter((c) => !tagContactIds || tagContactIds.has(c.contactId))
+      .filter((c) => !interestContactIds || interestContactIds.has(c.contactId))
       .map((c) => c.id);
   }
 
@@ -726,6 +741,7 @@ export class BroadcastService {
         type: headerMedia?.type ?? MessageType.TEXT,
         status: MessageStatus.SENT,
         body: displayText,
+        metaTemplateName: templateName,
         whatsappMessageId: messageId,
         whatsappTimestamp: now,
         fromAi: false,

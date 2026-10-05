@@ -324,8 +324,9 @@ export interface BroadcastContactsPage {
   total: number;
 }
 
-export async function getBroadcastContacts(params?: { cursor?: string; limit?: number; q?: string; campaignIds?: string[]; tagIds?: string[] }): Promise<BroadcastContactsPage> {
+export async function getBroadcastContacts(params?: { cursor?: string; limit?: number; q?: string; campaignIds?: string[]; tagIds?: string[]; interestStatus?: string }): Promise<BroadcastContactsPage> {
   const qs = new URLSearchParams();
+  if (params?.interestStatus) qs.set('interestStatus', params.interestStatus);
   if (params?.cursor) qs.set('cursor', params.cursor);
   if (params?.limit) qs.set('limit', String(params.limit));
   if (params?.q?.trim()) qs.set('q', params.q.trim());
@@ -335,8 +336,9 @@ export async function getBroadcastContacts(params?: { cursor?: string; limit?: n
   return api<BroadcastContactsPage>(`/broadcast/contacts${query ? `?${query}` : ''}`);
 }
 
-export async function getBroadcastContactIds(params?: { q?: string; onlyCanSend?: boolean; campaignIds?: string[]; tagIds?: string[] }): Promise<string[]> {
+export async function getBroadcastContactIds(params?: { q?: string; onlyCanSend?: boolean; campaignIds?: string[]; tagIds?: string[]; interestStatus?: string }): Promise<string[]> {
   const qs = new URLSearchParams();
+  if (params?.interestStatus) qs.set('interestStatus', params.interestStatus);
   if (params?.q?.trim()) qs.set('q', params.q.trim());
   if (params?.onlyCanSend) qs.set('onlyCanSend', 'true');
   if (params?.campaignIds?.length) qs.set('campaignIds', params.campaignIds.join(','));
@@ -421,6 +423,7 @@ export interface ContactItem {
   email?: string | null;
   tagId?: string | null;
   tagName?: string | null;
+  interestStatus?: 'INTERESTED' | 'NOT_INTERESTED' | null;
   isSandboxAuthorized: boolean;
   createdAt: number;
 }
@@ -431,8 +434,9 @@ export interface ContactsPage {
   total: number;
 }
 
-export async function getContactsList(params?: { cursor?: string; limit?: number; q?: string; campaignIds?: string[]; agentIds?: string[]; tagIds?: string[]; dateFrom?: string; dateTo?: string }): Promise<ContactsPage> {
+export async function getContactsList(params?: { cursor?: string; limit?: number; q?: string; campaignIds?: string[]; agentIds?: string[]; tagIds?: string[]; dateFrom?: string; dateTo?: string; interestStatus?: string }): Promise<ContactsPage> {
   const qs = new URLSearchParams();
+  if (params?.interestStatus) qs.set('interestStatus', params.interestStatus);
   if (params?.cursor) qs.set('cursor', params.cursor);
   if (params?.limit) qs.set('limit', String(params.limit));
   if (params?.q?.trim()) qs.set('q', params.q.trim());
@@ -445,8 +449,9 @@ export async function getContactsList(params?: { cursor?: string; limit?: number
   return api<ContactsPage>(`/contacts${query ? `?${query}` : ''}`);
 }
 
-export async function getContactIds(params?: { q?: string; campaignIds?: string[]; agentIds?: string[]; tagIds?: string[]; dateFrom?: string; dateTo?: string }): Promise<string[]> {
+export async function getContactIds(params?: { q?: string; campaignIds?: string[]; agentIds?: string[]; tagIds?: string[]; dateFrom?: string; dateTo?: string; interestStatus?: string }): Promise<string[]> {
   const qs = new URLSearchParams();
+  if (params?.interestStatus) qs.set('interestStatus', params.interestStatus);
   if (params?.q?.trim()) qs.set('q', params.q.trim());
   if (params?.campaignIds?.length) qs.set('campaignIds', params.campaignIds.join(','));
   if (params?.agentIds?.length) qs.set('agentIds', params.agentIds.join(','));
@@ -1186,10 +1191,11 @@ export async function getAgentContactMap(
   agentIds: string[],
   dateFrom?: string,
   dateTo?: string,
+  interestStatus?: string,
 ): Promise<{ ok: boolean; byAgent: Record<string, string[]> }> {
   return api('/contacts/agent-contacts', {
     method: 'POST',
-    body: JSON.stringify({ agentIds, dateFrom, dateTo }),
+    body: JSON.stringify({ agentIds, dateFrom, dateTo, interestStatus }),
   });
 }
 

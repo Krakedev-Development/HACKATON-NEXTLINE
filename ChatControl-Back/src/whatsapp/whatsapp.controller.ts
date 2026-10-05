@@ -262,6 +262,7 @@ export class WhatsAppController {
               type: MessageType.TEXT,
               replyToWamid: msg.context?.id,
               referral,
+              quickReply: true,
             });
           } else if (msg.type === 'interactive' && (msg.interactive?.button_reply || msg.interactive?.list_reply)) {
             const replyText = msg.interactive.button_reply?.title || msg.interactive.list_reply?.title || '';
@@ -275,6 +276,7 @@ export class WhatsAppController {
               type: MessageType.TEXT,
               replyToWamid: msg.context?.id,
               referral,
+              quickReply: !!msg.interactive.button_reply,
             });
           } else if (isMedia) {
             const mediaData = (msg as any)[msg.type];

@@ -212,6 +212,8 @@ model Contact {
   phone               String
   email               String?
   tagId               String?
+  interestStatus      String?
+  interestRespondedAt DateTime?
   createdAt           DateTime       @default(now())
   isSandboxAuthorized Boolean        @default(false)
   name                String?
@@ -229,6 +231,7 @@ model Contact {
   @@index([phone])
   @@index([campaignId])
   @@index([tagId])
+  @@index([organizationId, interestStatus])
 }
 
 model Conversation {
@@ -279,6 +282,7 @@ model Message {
   type              MessageType      @default(TEXT)
   status            MessageStatus    @default(SENT)
   body              String
+  metaTemplateName  String?
   whatsappMessageId String           @unique
   whatsappTimestamp DateTime
   fromAi            Boolean?         @default(false)

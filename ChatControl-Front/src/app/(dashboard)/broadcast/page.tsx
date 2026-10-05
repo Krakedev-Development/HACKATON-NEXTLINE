@@ -247,6 +247,7 @@ export default function BroadcastPage() {
   const { sending, startBroadcastSend } = useBroadcastProgress();
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [interestStatus, setInterestStatus] = useState('');
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -334,8 +335,8 @@ export default function BroadcastPage() {
     setLoading(true);
     try {
       const [page, ids] = await Promise.all([
-        getBroadcastContacts({ q, tagIds, limit: PAGE_SIZE }),
-        getBroadcastContactIds({ q, tagIds, onlyCanSend }),
+        getBroadcastContacts({ q, tagIds, interestStatus, limit: PAGE_SIZE }),
+        getBroadcastContactIds({ q, tagIds, interestStatus, onlyCanSend }),
       ]);
       setContacts(page.contacts);
       setNextCursor(page.nextCursor);
@@ -350,7 +351,7 @@ export default function BroadcastPage() {
     setLoadingMore(true);
     try {
       const tagIds = contactSource === 'tags' ? Array.from(selectedTagIds) : undefined;
-      const page = await getBroadcastContacts({ q: debouncedQuery, tagIds, limit: PAGE_SIZE, cursor: nextCursor });
+      const page = await getBroadcastContacts({ q: debouncedQuery, tagIds, interestStatus, limit: PAGE_SIZE, cursor: nextCursor });
       setContacts(prev => [...prev, ...page.contacts]);
       setNextCursor(page.nextCursor);
       setTotal(page.total);
@@ -374,7 +375,7 @@ export default function BroadcastPage() {
       loadFirstPage(debouncedQuery, Array.from(selectedTagIds), true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mounted, debouncedQuery, contactSource, onlyCanSend, tagIdsKey]);
+  }, [mounted, debouncedQuery, contactSource, onlyCanSend, tagIdsKey, interestStatus]);
 
   function handleContactListScroll(e: React.UIEvent<HTMLDivElement>) {
     const el = e.currentTarget;
@@ -545,14 +546,25 @@ export default function BroadcastPage() {
     try {
       const preview = await previewBroadcastLists(listIds);
       setListPreview(preview);
-      setSelectedIds(new Set(preview.conversationIds));
+      const allowed = interestStatus ? new Set(await getBroadcastContactIds({ interestStatus })) : null;
+      setSelectedIds(new Set(preview.conversationIds.filter((id) => !allowed || allowed.has(id))));
     } catch (err) {
       console.error('Error loading list preview', err);
       setListPreview(null);
     } finally {
       setLoadingList(false);
     }
-  }, []);
+  }, [interestStatus]);
+
+  useEffect(() => {
+    if (contactSource !== 'excel_import' || !excelImportResult) return;
+    let active = true;
+    (async () => {
+      const allowed = interestStatus ? new Set(await getBroadcastContactIds({ interestStatus })) : null;
+      if (active) setSelectedIds(new Set(excelImportResult.conversationIds.filter((id) => !allowed || allowed.has(id))));
+    })().catch(() => {});
+    return () => { active = false; };
+  }, [contactSource, excelImportResult, interestStatus]);
 
   useEffect(() => {
     if (contactSource === 'crm_lists' && selectedListIds.size > 0) {
@@ -847,7 +859,8 @@ export default function BroadcastPage() {
     try {
       const result = await importExcelContacts(excelPreviewRows);
       setExcelImportResult(result);
-      setSelectedIds(new Set(result.conversationIds));
+      const allowed = interestStatus ? new Set(await getBroadcastContactIds({ interestStatus })) : null;
+      setSelectedIds(new Set(result.conversationIds.filter((id) => !allowed || allowed.has(id))));
     } catch (err) {
       setExcelError(err instanceof Error ? err.message : 'Error al importar el archivo.');
     } finally {
@@ -1069,6 +1082,13 @@ export default function BroadcastPage() {
               style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '12px', padding: '0.75rem 1rem 0.75rem 2.8rem', color: 'white', outline: 'none', fontSize: '0.9rem' }}
             />
           </div>
+          <label htmlFor="broadcast-interest" style={{ display: 'block', fontSize: '0.7rem', color: '#888', marginBottom: 6 }}>Interés en diplomado</label>
+          <select id="broadcast-interest" value={interestStatus} onChange={(e) => { setInterestStatus(e.target.value); setSelectedIds(new Set()); }} style={{ width: '100%', background: '#111', color: 'white', border: '1px solid #333', borderRadius: 8, padding: '0.6rem', marginBottom: '1rem' }}>
+            <option value="">Todos</option>
+            <option value="INTERESTED">Interesados</option>
+            <option value="NOT_INTERESTED">No interesados</option>
+            <option value="UNANSWERED">Sin respuesta</option>
+          </select>
           <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
             {([
               ['manual', 'Contactos Manuales'],
