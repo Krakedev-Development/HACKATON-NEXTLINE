@@ -26,6 +26,7 @@ export class BroadcastController {
     @Query('q') q?: string,
     @Query('campaignIds') campaignIds?: string,
     @Query('tagIds') tagIds?: string,
+    @Query('interestStatus') interestStatus?: string,
   ) {
     return this.broadcast.getContacts(
       user.organizationId!,
@@ -35,6 +36,7 @@ export class BroadcastController {
         q,
         campaignIds: campaignIds ? campaignIds.split(',').filter(Boolean) : undefined,
         tagIds: tagIds ? tagIds.split(',').filter(Boolean) : undefined,
+        interestStatus,
       },
       cursor,
       limit ? parseInt(limit, 10) : undefined,
@@ -48,12 +50,14 @@ export class BroadcastController {
     @Query('onlyCanSend') onlyCanSend?: string,
     @Query('campaignIds') campaignIds?: string,
     @Query('tagIds') tagIds?: string,
+    @Query('interestStatus') interestStatus?: string,
   ) {
     const ids = await this.broadcast.getAllContactIds(user.organizationId!, user.userId, user.role, {
       q,
       onlyCanSend: onlyCanSend === 'true',
       campaignIds: campaignIds ? campaignIds.split(',').filter(Boolean) : undefined,
       tagIds: tagIds ? tagIds.split(',').filter(Boolean) : undefined,
+      interestStatus,
     });
     return { ids };
   }

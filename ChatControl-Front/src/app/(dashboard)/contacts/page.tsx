@@ -74,6 +74,7 @@ export default function ContactsPage() {
   const [error, setError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [interestStatus, setInterestStatus] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -96,7 +97,7 @@ export default function ContactsPage() {
   async function loadFirstPage(q: string) {
     setLoading(true);
     try {
-      const page = await getContactsList({ q, limit: PAGE_SIZE });
+      const page = await getContactsList({ q, interestStatus, limit: PAGE_SIZE });
       setContacts(page.contacts);
       setNextCursor(page.nextCursor);
       setTotal(page.total);
@@ -107,7 +108,7 @@ export default function ContactsPage() {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
     try {
-      const page = await getContactsList({ q: debouncedQuery, limit: PAGE_SIZE, cursor: nextCursor });
+      const page = await getContactsList({ q: debouncedQuery, interestStatus, limit: PAGE_SIZE, cursor: nextCursor });
       setContacts(prev => [...prev, ...page.contacts]);
       setNextCursor(page.nextCursor);
       setTotal(page.total);
@@ -126,7 +127,7 @@ export default function ContactsPage() {
   useEffect(() => {
     if (!mounted || !isLoggedIn()) return;
     loadFirstPage(debouncedQuery);
-  }, [mounted, debouncedQuery]);
+  }, [mounted, debouncedQuery, interestStatus]);
 
   function handleListScroll(e: React.UIEvent<HTMLDivElement>) {
     const el = e.currentTarget;
@@ -335,6 +336,13 @@ export default function ContactsPage() {
               style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '12px', padding: '0.75rem 1rem 0.75rem 2.8rem', color: 'white', outline: 'none', fontSize: '0.9rem' }}
             />
           </div>
+          <label htmlFor="contact-interest" style={{ display: 'block', fontSize: '0.7rem', color: '#888', marginBottom: 6 }}>Interés en diplomado</label>
+          <select id="contact-interest" value={interestStatus} onChange={(e) => setInterestStatus(e.target.value)} style={{ width: '100%', background: '#111', color: 'white', border: '1px solid #333', borderRadius: 8, padding: '0.6rem', marginBottom: '1rem' }}>
+            <option value="">Todos</option>
+            <option value="INTERESTED">Interesados</option>
+            <option value="NOT_INTERESTED">No interesados</option>
+            <option value="UNANSWERED">Sin respuesta</option>
+          </select>
           <button
             onClick={handleNew}
             style={{ width: '100%', padding: '0.75rem', background: 'linear-gradient(135deg, #EF4444 0%, #991B1B 100%)', border: 'none', borderRadius: '12px', color: 'white', fontSize: '0.8rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', boxShadow: '0 8px 15px rgba(239, 68, 68, 0.2)', marginBottom: '0.5rem' }}
@@ -385,6 +393,7 @@ export default function ContactsPage() {
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ fontWeight: 700, fontSize: '0.95rem', color: selectedId === c.id ? 'white' : '#F2F2F2', display: 'block' }}>{c.name || formatPhoneDisplay(c.phone)}</span>
+                <span style={{ color: c.interestStatus === 'INTERESTED' ? '#34d399' : c.interestStatus === 'NOT_INTERESTED' ? '#f87171' : '#777', fontSize: '0.65rem' }}>{c.interestStatus === 'INTERESTED' ? 'Interesado' : c.interestStatus === 'NOT_INTERESTED' ? 'No interesado' : 'Sin respuesta'}</span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   <span style={{ fontSize: '0.75rem', color: '#666' }}>{formatPhoneDisplay(c.phone)}</span>
                   {isSandbox && c.isSandboxAuthorized && (

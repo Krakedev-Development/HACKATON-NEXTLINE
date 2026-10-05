@@ -198,6 +198,7 @@ export default function InformesPage() {
   const [dateTo, setDateTo] = useState('');
   const [tags, setTags] = useState<Tag[]>([]);
   const [selectedTagId, setSelectedTagId] = useState('');
+  const [interestStatus, setInterestStatus] = useState('');
 
   const [selectedColumns, setSelectedColumns] = useState<Set<ColumnKey>>(
     new Set<ColumnKey>(['date', 'form', 'email', 'name', 'phone', 'agent', 'platform', 'tag', 'tagId', 'contactId', 'crmLeadId', 'agentId'])
@@ -219,7 +220,7 @@ export default function InformesPage() {
 
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [debouncedQuery, dateFrom, dateTo, selectedTagId]);
+  }, [debouncedQuery, dateFrom, dateTo, selectedTagId, interestStatus]);
 
   useEffect(() => {
     setSendResult(null);
@@ -254,18 +255,18 @@ export default function InformesPage() {
     (async () => {
       try {
         const agentIds = agents.map(a => a.id);
-        const res = await getAgentContactMap(agentIds, dateFrom, dateTo);
+        const res = await getAgentContactMap(agentIds, dateFrom, dateTo, interestStatus);
         setAgentContactMap(res.byAgent);
       } catch (err) { }
     })();
-  }, [agents, dateFrom, dateTo]);
+  }, [agents, dateFrom, dateTo, interestStatus]);
 
   async function loadFirstPage(q: string, agentIds: string[], from: string, to: string, tagId: string) {
     setLoading(true);
     try {
       const [page, ids] = await Promise.all([
-        getContactsList({ q, agentIds, tagIds: tagId ? [tagId] : undefined, dateFrom: from, dateTo: to, limit: PAGE_SIZE }),
-        getContactIds({ q, agentIds, tagIds: tagId ? [tagId] : undefined, dateFrom: from, dateTo: to }),
+        getContactsList({ q, agentIds, tagIds: tagId ? [tagId] : undefined, dateFrom: from, dateTo: to, interestStatus, limit: PAGE_SIZE }),
+        getContactIds({ q, agentIds, tagIds: tagId ? [tagId] : undefined, dateFrom: from, dateTo: to, interestStatus }),
       ]);
       setContacts(page.contacts);
       setNextCursor(page.nextCursor);
@@ -278,7 +279,7 @@ export default function InformesPage() {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
     try {
-      const page = await getContactsList({ q: debouncedQuery, agentIds: Array.from(selectedAgentIds), tagIds: selectedTagId ? [selectedTagId] : undefined, dateFrom, dateTo, limit: PAGE_SIZE, cursor: nextCursor });
+      const page = await getContactsList({ q: debouncedQuery, agentIds: Array.from(selectedAgentIds), tagIds: selectedTagId ? [selectedTagId] : undefined, dateFrom, dateTo, interestStatus, limit: PAGE_SIZE, cursor: nextCursor });
       setContacts(prev => [...prev, ...page.contacts]);
       setNextCursor(page.nextCursor);
       setTotal(page.total);
@@ -288,7 +289,7 @@ export default function InformesPage() {
   useEffect(() => {
     if (!mounted || !isLoggedIn()) return;
     loadFirstPage(debouncedQuery, Array.from(selectedAgentIds), dateFrom, dateTo, selectedTagId);
-  }, [mounted, debouncedQuery, selectedAgentIds, dateFrom, dateTo, selectedTagId]);
+  }, [mounted, debouncedQuery, selectedAgentIds, dateFrom, dateTo, selectedTagId, interestStatus]);
 
   function handleListScroll(e: React.UIEvent<HTMLDivElement>) {
     const el = e.currentTarget;
@@ -316,17 +317,23 @@ export default function InformesPage() {
     setSelectedIds(next);
   };
 
-  const toggleAgent = (agentId: string) => {
+  const toggleAgent = async (agentId: string) => {
     const nextAgents = new Set(selectedAgentIds);
     const nextContacts = new Set(selectedIds);
+    const ids = await getContactIds({
+      q: debouncedQuery,
+      agentIds: [agentId],
+      tagIds: selectedTagId ? [selectedTagId] : undefined,
+      dateFrom,
+      dateTo,
+      interestStatus,
+    });
 
     if (nextAgents.has(agentId)) {
       nextAgents.delete(agentId);
-      const toRemove = agentContactMap[agentId] || [];
-      for (const cid of toRemove) nextContacts.delete(cid);
+      for (const cid of ids) nextContacts.delete(cid);
     } else {
       nextAgents.add(agentId);
-      const ids = agentContactMap[agentId] || [];
       for (const cid of ids) nextContacts.add(cid);
     }
 
@@ -496,6 +503,17 @@ export default function InformesPage() {
                 />
               </div>
             </div>
+          </div>
+
+          {/* Agent filter (solo ORG_ADMIN) */}
+          <div style={{ marginTop: '0.75rem', padding: '0.65rem 0.75rem', background: 'rgba(255,255,255,0.02)', borderRadius: 10, border: '1px solid rgba(255,255,255,0.05)' }}>
+            <label htmlFor="report-interest" style={{ display: 'block', fontSize: '0.65rem', color: '#777', marginBottom: 8 }}>Interés en diplomado</label>
+            <select id="report-interest" value={interestStatus} onChange={(e) => setInterestStatus(e.target.value)} style={{ width: '100%', background: '#111', color: 'white', padding: '0.5rem', borderRadius: 8 }}>
+              <option value="">Todos</option>
+              <option value="INTERESTED">Interesados</option>
+              <option value="NOT_INTERESTED">No interesados</option>
+              <option value="UNANSWERED">Sin respuesta</option>
+            </select>
           </div>
 
           {/* Agent filter (solo ORG_ADMIN) */}

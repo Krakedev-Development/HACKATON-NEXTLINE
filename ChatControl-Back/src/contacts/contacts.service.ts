@@ -8,6 +8,7 @@ export interface ContactDto {
   email: string | null;
   tagId: string | null;
   tagName: string | null;
+  interestStatus: string | null;
   isSandboxAuthorized: boolean;
   createdAt: number;
 }
@@ -30,6 +31,7 @@ export interface ContactsFilter {
   dateFrom?: string;
   dateTo?: string;
   tagIds?: string[];
+  interestStatus?: string;
 }
 
 const MAX_PAGE_SIZE = 200;
@@ -63,6 +65,10 @@ export class ContactsService {
     }
     if (filter?.tagIds?.length) {
       where.tagId = { in: filter.tagIds };
+    }
+    if (filter?.interestStatus === 'UNANSWERED') where.interestStatus = null;
+    else if (filter?.interestStatus === 'INTERESTED' || filter?.interestStatus === 'NOT_INTERESTED') {
+      where.interestStatus = filter.interestStatus;
     }
     if (filter?.dateFrom || filter?.dateTo) {
       where.createdAt = {};
@@ -111,6 +117,7 @@ export class ContactsService {
         email: c.email,
         tagId: c.tagId,
         tagName: c.tag?.name ?? null,
+        interestStatus: c.interestStatus,
         isSandboxAuthorized: c.isSandboxAuthorized,
         createdAt: c.createdAt.getTime(),
       })),
@@ -179,6 +186,7 @@ export class ContactsService {
       email: contact.email,
       tagId: contact.tagId,
       tagName: contact.tag?.name ?? null,
+      interestStatus: contact.interestStatus,
       isSandboxAuthorized: contact.isSandboxAuthorized,
       createdAt: contact.createdAt.getTime(),
     };
@@ -211,6 +219,7 @@ export class ContactsService {
       email: contact.email,
       tagId: contact.tagId,
       tagName: contact.tag?.name ?? null,
+      interestStatus: contact.interestStatus,
       isSandboxAuthorized: contact.isSandboxAuthorized,
       createdAt: contact.createdAt.getTime(),
     };
@@ -235,6 +244,7 @@ export class ContactsService {
       email: contact.email,
       tagId: contact.tagId,
       tagName: contact.tag?.name ?? null,
+      interestStatus: contact.interestStatus,
       isSandboxAuthorized: contact.isSandboxAuthorized,
       createdAt: contact.createdAt.getTime(),
     };
@@ -387,9 +397,14 @@ export class ContactsService {
     agentIds: string[],
     dateFrom?: string,
     dateTo?: string,
+    interestStatus?: string,
   ): Promise<Record<string, string[]>> {
     if (!agentIds.length) return {};
     const contactDateFilter: any = { organizationId };
+    if (interestStatus === 'UNANSWERED') contactDateFilter.interestStatus = null;
+    else if (interestStatus === 'INTERESTED' || interestStatus === 'NOT_INTERESTED') {
+      contactDateFilter.interestStatus = interestStatus;
+    }
     if (dateFrom || dateTo) {
       contactDateFilter.createdAt = {};
       if (dateFrom) contactDateFilter.createdAt.gte = new Date(dateFrom);

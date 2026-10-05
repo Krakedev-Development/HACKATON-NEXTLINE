@@ -96,6 +96,7 @@ export class ChatService {
     fileName?: string;
     contactName?: string;
     replyToWamid?: string;
+    quickReply?: boolean;
     referral?: Record<string, any>;
   }): Promise<void> {
     const phone = normalizePhone(payload.from);
@@ -238,6 +239,22 @@ export class ChatService {
         }
       }
 
+      // TODO: hacer configurables por plantilla las respuestas, estados y acciones.
+      // Por ahora solo esta plantilla cambia el interés y la asignación.
+      let interestStatus: 'INTERESTED' | 'NOT_INTERESTED' | null = null;
+      if (payload.quickReply && replyToId) {
+        const original = await this.prisma.message.findUnique({
+          where: { id: replyToId },
+          select: { metaTemplateName: true, direction: true },
+        });
+        const templateKey = original?.metaTemplateName?.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (original?.direction === MessageDirection.OUT && templateKey === 'diplomadoiaparadocentes') {
+          const answer = payload.text.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+          if (answer === 'quiero mas informacion') interestStatus = 'INTERESTED';
+          if (answer === 'no deseo recibir mas informacion') interestStatus = 'NOT_INTERESTED';
+        }
+      }
+
       const created = await this.prisma.message.create({
         data: {
           conversationId: conversation.id,
@@ -256,7 +273,24 @@ export class ChatService {
         },
       });
 
-      if (isNewConversation) {
+      let interestApplied = false;
+      if (interestStatus) {
+        const result = await this.prisma.contact.updateMany({
+          where: {
+            id: contact.id,
+            OR: [
+              { interestRespondedAt: null },
+              { interestRespondedAt: { lte: new Date(payload.timestamp) } },
+            ],
+          },
+          data: { interestStatus, interestRespondedAt: new Date(payload.timestamp) },
+        });
+        interestApplied = result.count > 0;
+      }
+
+      if (interestApplied && interestStatus === 'INTERESTED') {
+        await this.leadAssignment.assignNewLead(conversation.id, payload.organizationId);
+      } else if (isNewConversation && interestStatus === null) {
         await this.leadAssignment.tryAutoAssignNewLead(conversation.id, payload.organizationId);
       }
 

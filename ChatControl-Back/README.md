@@ -87,6 +87,12 @@ Variables adicionales en `.env` para la integración:
 
 La URL que recibe Nextline para enviar informes proviene de `CRM_PUBLIC_URL` en el backend CRM. En producción debe ser el origen público del **backend** CRM, sin `/api`; si cambia después de vincular, vuelve a vincular para actualizarla. Reenviar un contacto existente actualiza sus datos de Nextline en el CRM y conserva su vendedor.
 
+### Respuestas del diplomado
+
+La plantilla de Meta `Diplomado Iapara Docentes` clasifica el contacto como **Interesado** o **No interesado** cuando responde con los botones “Quiero más información” o “No deseo recibir más información”. Se identifica la plantilla del mensaje original al que responde; otros mensajes con el mismo texto no cambian el estado. Una respuesta positiva asigna por turno a un agente activo si el chat aún no tiene agente. Una respuesta negativa deja sin asignar un chat nuevo y conserva cualquier asignación anterior. La respuesta más reciente determina el estado. Los contactos sin respuesta mantienen el estado vacío.
+
+El filtro está disponible en Contactos, Masivos e Informes y no excluye automáticamente de masivos a los no interesados. Este estado permanece en Nextline y no se envía al CRM. Para activar la función, aplica la migración Prisma `20261005000000_contact_interest_status` **antes** de desplegar el backend y el frontend. Los mensajes de plantilla enviados antes de este cambio no tienen el identificador de plantilla necesario para clasificar sus respuestas.
+
 ---
 
 ## 🌐 Pruebas Locales de Webhooks (WhatsApp/Meta) con Ngrok
