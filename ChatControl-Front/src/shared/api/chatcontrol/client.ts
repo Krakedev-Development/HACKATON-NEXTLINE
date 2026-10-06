@@ -190,6 +190,10 @@ export async function getConversations(): Promise<Conversation[]> {
   return api<Conversation[]>('/chat/conversations');
 }
 
+export async function searchConversationsByMessage(query: string): Promise<Array<{ conversationId: string; message: string }>> {
+  return api(`/chat/conversations/search?q=${encodeURIComponent(query)}`);
+}
+
 export async function getConversation(id: string): Promise<{
   ok: boolean;
   conversation: Conversation | null;

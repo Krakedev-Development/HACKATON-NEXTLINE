@@ -332,6 +332,10 @@ export class ChatService {
     return this.conversationsQuery.getConversations(organizationId, userId, userRole);
   }
 
+  async searchConversationsByMessage(organizationId: string, query: string, userId?: string, userRole?: string) {
+    return this.conversationsQuery.searchByMessage(organizationId, query, userId, userRole);
+  }
+
   async markConversationAsRead(conversationId: string, organizationId: string): Promise<void> {
     await this.assertConversationInOrg(conversationId, organizationId);
     const latestMessage = await this.prisma.message.findFirst({
