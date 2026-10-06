@@ -8,6 +8,7 @@ import {
   isLoggedIn,
   getMe,
   getConversations,
+  searchConversationsByMessage,
   getMessages,
   getConversation,
   markConversationAsRead,
@@ -261,6 +262,10 @@ export default function ChatPage() {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [messageSearchResult, setMessageSearchResult] = useState<{ term: string; matches: Record<string, string> }>({ term: '', matches: {} });
+  const [searchingMessages, setSearchingMessages] = useState(false);
+  const [messageSearchError, setMessageSearchError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [replyInput, setReplyInput] = useState('');
   const [replyTarget, setReplyTarget] = useState<Message | null>(null);
@@ -665,8 +670,44 @@ export default function ChatPage() {
     }
   }
 
-  const filteredConversations = conversations.filter(c => 
-    c.phone.includes(searchQuery) || (c.name?.toLowerCase().includes(searchQuery.toLowerCase()))
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 350);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    if (debouncedSearch.length < 2) {
+      setSearchingMessages(false);
+      setMessageSearchError(false);
+      return;
+    }
+    let active = true;
+    setSearchingMessages(true);
+    setMessageSearchError(false);
+    searchConversationsByMessage(debouncedSearch)
+      .then((matches) => {
+        if (active) setMessageSearchResult({
+          term: debouncedSearch,
+          matches: Object.fromEntries(matches.map((match) => [match.conversationId, match.message])),
+        });
+      })
+      .catch(() => { if (active) setMessageSearchError(true); })
+      .finally(() => { if (active) setSearchingMessages(false); });
+    return () => { active = false; };
+  }, [debouncedSearch]);
+
+  const normalizedSearch = searchQuery.trim().toLowerCase();
+  const pendingMessageSearch = normalizedSearch.length >= 2 &&
+    (debouncedSearch.toLowerCase() !== normalizedSearch || searchingMessages);
+  const messageMatches = messageSearchResult.term.toLowerCase() === normalizedSearch
+    ? messageSearchResult.matches
+    : {};
+  const filteredConversations = conversations.filter((conversation) =>
+    !normalizedSearch ||
+    conversation.phone.includes(normalizedSearch) ||
+    conversation.name?.toLowerCase().includes(normalizedSearch) ||
+    conversation.lastMessagePreview.toLowerCase().includes(normalizedSearch) ||
+    messageMatches[conversation.id] !== undefined
   );
 
   const selectedConv = conversations.find(c => c.id === selectedId);
@@ -762,12 +803,15 @@ export default function ChatPage() {
             <SearchIcon style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: '#444' }} />
             <input 
               type="text" 
-              placeholder="Buscar conversación..."
+              placeholder="Buscar contacto o mensaje..."
+              maxLength={120}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               style={{ width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '12px', padding: '0.75rem 1rem 0.75rem 2.8rem', color: 'white', outline: 'none', fontSize: '0.9rem' }}
             />
           </div>
+          {pendingMessageSearch && <p style={{ color: '#888', fontSize: '0.7rem', marginTop: 8 }}>Buscando en mensajes...</p>}
+          {searchQuery.trim().length >= 2 && messageSearchError && <p style={{ color: '#EF4444', fontSize: '0.7rem', marginTop: 8 }}>No se pudo buscar en los mensajes. Inténtalo de nuevo.</p>}
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '0.75rem' }} className="custom-scrollbar">
@@ -780,6 +824,10 @@ export default function ChatPage() {
               </div>
               <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#222', textTransform: 'uppercase', letterSpacing: '0.2em' }}>Sincronizando</span>
             </div>
+          ) : filteredConversations.length === 0 && searchQuery.trim() && !pendingMessageSearch && !messageSearchError ? (
+            <p style={{ padding: '2rem 1rem', color: '#777', fontSize: '0.8rem', textAlign: 'center' }}>
+              {searchQuery.trim().length < 2 ? 'Escribe al menos 2 caracteres para buscar mensajes.' : 'No hay contactos ni mensajes que coincidan.'}
+            </p>
           ) : filteredConversations.map(c => {
             const isUnread = (c.unreadCount ?? 0) > 0 && selectedId !== c.id;
             return (
@@ -815,7 +863,7 @@ export default function ChatPage() {
                     <span style={{ fontSize: '0.7rem', color: '#444' }}>{c.lastMessageAt ? formatConversationDate(c.lastMessageAt) : ''}</span>
                   </div>
                   <p style={{ fontSize: '0.8rem', color: isUnread ? '#EF4444' : (selectedId === c.id ? '#999' : '#666'), margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: isUnread ? 700 : 400 }}>
-                    {c.lastMessagePreview || 'Inicia una conversación'}
+                    {messageMatches[c.id] !== undefined ? `Coincidencia: ${messageMatches[c.id]}` : c.lastMessagePreview || 'Inicia una conversación'}
                   </p>
                 </div>
                 {isUnread && (

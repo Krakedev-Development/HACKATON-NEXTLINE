@@ -7,6 +7,44 @@ import { Conversation } from './chat.service';
 export class ConversationsQueryService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async searchByMessage(
+    organizationId: string,
+    query: string,
+    userId?: string,
+    userRole?: string,
+  ): Promise<Array<{ conversationId: string; message: string }>> {
+    const text = query.trim().slice(0, 120);
+    if (text.length < 2) return [];
+
+    const messageFilter = { body: { contains: text, mode: 'insensitive' as const } };
+    const conversations = await this.prisma.conversation.findMany({
+      where: {
+        contact: { organizationId },
+        ...(userRole === 'AGENT' && userId ? { assignedToUserId: userId } : {}),
+        messages: { some: messageFilter },
+      },
+      select: {
+        id: true,
+        messages: {
+          where: messageFilter,
+          orderBy: { whatsappTimestamp: 'desc' },
+          take: 1,
+          select: { body: true },
+        },
+      },
+    });
+    return conversations.map((conversation) => {
+      const body = conversation.messages[0].body;
+      const matchAt = body.toLowerCase().indexOf(text.toLowerCase());
+      const start = Math.max(0, matchAt - 35);
+      const end = Math.min(body.length, start + 100);
+      return {
+        conversationId: conversation.id,
+        message: `${start > 0 ? '…' : ''}${body.slice(start, end)}${end < body.length ? '…' : ''}`,
+      };
+    });
+  }
+
   async getConversations(
     organizationId: string,
     userId?: string,

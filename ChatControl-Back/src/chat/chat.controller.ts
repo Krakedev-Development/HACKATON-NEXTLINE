@@ -55,6 +55,11 @@ export class ChatController {
     return this.chat.getConversations(user.organizationId!, user.userId, user.role);
   }
 
+  @Get('conversations/search')
+  async searchConversationsByMessage(@CurrentUser() user: AuthUser, @Query('q') query?: string) {
+    return this.chat.searchConversationsByMessage(user.organizationId!, query || '', user.userId, user.role);
+  }
+
   @Get('conversations/:id')
   async getConversation(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     const conv = await this.chat.getConversation(id, user.organizationId!, user.userId, user.role);
