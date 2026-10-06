@@ -137,6 +137,22 @@ const RUN_REASON_FILTERS: Array<{ status?: 'sent' | 'failed'; category?: string;
   { status: 'failed', category: 'OTHER', label: 'Otro' },
 ];
 
+const RUN_ENGAGEMENT_FILTERS = [
+  { value: 'INTERESTED', label: 'Interesados' },
+  { value: 'NOT_INTERESTED', label: 'No interesados' },
+  { value: 'OTHER_REPLY', label: 'Otra respuesta' },
+  { value: 'READ_NO_REPLY', label: 'Leídos sin respuesta' },
+  { value: 'NO_READ_RECEIPT', label: 'Sin confirmación de lectura' },
+] as const;
+
+function engagementLabel(value: string | null): string {
+  return RUN_ENGAGEMENT_FILTERS.find((filter) => filter.value === value)?.label || 'Sin datos';
+}
+
+function deliveryLabel(value: string | null): string {
+  return value === 'READ' ? 'Leído' : value === 'DELIVERED' ? 'Entregado' : value === 'SENT' ? 'Enviado' : value === 'FAILED' ? 'Fallido' : 'Sin datos';
+}
+
 function formatRunDate(iso: string): string {
   return new Date(iso).toLocaleDateString('es-ES', {
     day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
@@ -395,6 +411,8 @@ export default function BroadcastPage() {
   const [loadingMoreRunContacts, setLoadingMoreRunContacts] = useState(false);
   const [runContactsStatus, setRunContactsStatus] = useState<'sent' | 'failed' | undefined>(undefined);
   const [runContactsCategory, setRunContactsCategory] = useState<string | undefined>(undefined);
+  const [runContactsEngagement, setRunContactsEngagement] = useState<string | undefined>(undefined);
+  const runContactsRequestId = useRef(0);
   const [exportingRun, setExportingRun] = useState(false);
   const [auditTagPanelOpen, setAuditTagPanelOpen] = useState(false);
   const [auditTagId, setAuditTagId] = useState<string | null>(null);
@@ -434,24 +452,26 @@ export default function BroadcastPage() {
     resetAuditTagPanel();
   };
 
-  const loadRunContacts = useCallback((runId: string, status?: 'sent' | 'failed', category?: string) => {
+  const loadRunContacts = useCallback((runId: string, status?: 'sent' | 'failed', category?: string, engagement?: string) => {
+    const requestId = ++runContactsRequestId.current;
     setLoadingRunContacts(true);
     setRunContacts([]);
     setRunContactsNextCursor(null);
-    getBroadcastRunContacts(runId, { status, category })
-      .then(({ contacts, nextCursor }) => { setRunContacts(contacts); setRunContactsNextCursor(nextCursor); })
-      .catch(() => { setRunContacts([]); setRunContactsNextCursor(null); })
-      .finally(() => setLoadingRunContacts(false));
+    getBroadcastRunContacts(runId, { status, category, engagement })
+      .then(({ contacts, nextCursor }) => { if (requestId === runContactsRequestId.current) { setRunContacts(contacts); setRunContactsNextCursor(nextCursor); } })
+      .catch(() => { if (requestId === runContactsRequestId.current) { setRunContacts([]); setRunContactsNextCursor(null); } })
+      .finally(() => { if (requestId === runContactsRequestId.current) setLoadingRunContacts(false); });
   }, []);
 
   const loadMoreRunContacts = useCallback(() => {
     if (!selectedRunId || !runContactsNextCursor || loadingMoreRunContacts) return;
+    const requestId = runContactsRequestId.current;
     setLoadingMoreRunContacts(true);
-    getBroadcastRunContacts(selectedRunId, { cursor: runContactsNextCursor, status: runContactsStatus, category: runContactsCategory })
-      .then(({ contacts, nextCursor }) => { setRunContacts(prev => [...prev, ...contacts]); setRunContactsNextCursor(nextCursor); })
+    getBroadcastRunContacts(selectedRunId, { cursor: runContactsNextCursor, status: runContactsStatus, category: runContactsCategory, engagement: runContactsEngagement })
+      .then(({ contacts, nextCursor }) => { if (requestId === runContactsRequestId.current) { setRunContacts(prev => [...prev, ...contacts]); setRunContactsNextCursor(nextCursor); } })
       .catch(() => {})
       .finally(() => setLoadingMoreRunContacts(false));
-  }, [selectedRunId, runContactsNextCursor, loadingMoreRunContacts, runContactsStatus, runContactsCategory]);
+  }, [selectedRunId, runContactsNextCursor, loadingMoreRunContacts, runContactsStatus, runContactsCategory, runContactsEngagement]);
 
   function handleRunContactsScroll(e: React.UIEvent<HTMLDivElement>) {
     const el = e.currentTarget;
@@ -462,6 +482,7 @@ export default function BroadcastPage() {
     setSelectedRunId(runId);
     setRunContactsStatus(undefined);
     setRunContactsCategory(undefined);
+    setRunContactsEngagement(undefined);
     resetAuditTagPanel();
     loadRunContacts(runId, undefined, undefined);
   };
@@ -469,28 +490,47 @@ export default function BroadcastPage() {
   const changeRunFilter = (status?: 'sent' | 'failed', category?: string) => {
     setRunContactsStatus(status);
     setRunContactsCategory(category);
+    setRunContactsEngagement(undefined);
     if (selectedRunId) loadRunContacts(selectedRunId, status, category);
+  };
+
+  const changeRunEngagement = (engagement: string) => {
+    const next = runContactsEngagement === engagement ? undefined : engagement;
+    setRunContactsStatus(next ? 'sent' : undefined);
+    setRunContactsCategory(undefined);
+    setRunContactsEngagement(next);
+    if (selectedRunId) loadRunContacts(selectedRunId, next ? 'sent' : undefined, undefined, next);
   };
 
   const handleExportRun = async () => {
     if (!selectedRunId || !selectedRun) return;
     setExportingRun(true);
     try {
-      const { contacts: allContacts } = await getBroadcastRunContacts(selectedRunId, {
-        limit: 5000,
-        status: runContactsStatus,
-        category: runContactsCategory,
-      });
+      const allContacts: BroadcastRunContact[] = [];
+      let cursor: string | null = null;
+      do {
+        const page = await getBroadcastRunContacts(selectedRunId, {
+          limit: 200,
+          cursor: cursor || undefined,
+          status: runContactsStatus,
+          category: runContactsCategory,
+          engagement: runContactsEngagement,
+        });
+        allContacts.push(...page.contacts);
+        cursor = page.nextCursor;
+      } while (cursor);
       const XLSX = await import('xlsx');
-      const header = ['Fecha y hora', 'Nombre', 'Número', 'Estado'];
+      const header = ['Fecha y hora', 'Nombre', 'Número', 'Estado', 'Entrega', 'Respuesta'];
       const rows = allContacts.map((c) => [
         formatRunDate(c.createdAt),
         c.name || '(sin nombre)',
         c.phone,
         c.status === 'sent' ? 'Enviado' : (c.failureLabel || 'Fallido'),
+        c.status === 'sent' ? deliveryLabel(c.deliveryStatus) : '',
+        c.status === 'sent' ? engagementLabel(c.engagement) : '',
       ]);
       const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
-      ws['!cols'] = [{ wch: 20 }, { wch: 28 }, { wch: 16 }, { wch: 22 }];
+      ws['!cols'] = [{ wch: 20 }, { wch: 28 }, { wch: 16 }, { wch: 22 }, { wch: 18 }, { wch: 30 }];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Masivo');
       const safeName = (selectedRun.title || selectedRun.runId.slice(0, 8)).replace(/[^a-z0-9]+/gi, '_').slice(0, 40);
@@ -2040,7 +2080,7 @@ export default function BroadcastPage() {
 
               <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
                 {RUN_REASON_FILTERS.filter((f) => f.category !== 'SANDBOX_BLOCKED' || me?.isSandbox).map((f) => {
-                  const active = runContactsStatus === f.status && runContactsCategory === f.category;
+                  const active = !runContactsEngagement && runContactsStatus === f.status && runContactsCategory === f.category;
                   return (
                     <button
                       key={f.label}
@@ -2060,6 +2100,29 @@ export default function BroadcastPage() {
                 })}
               </div>
 
+              <div>
+                <div style={{ color: '#8C8C8C', fontSize: '0.68rem', fontWeight: 800, marginBottom: '0.5rem', textTransform: 'uppercase' }}>
+                  Respuesta y lectura de los enviados
+                </div>
+                <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                  {RUN_ENGAGEMENT_FILTERS.map((filter) => (
+                    <button
+                      key={filter.value}
+                      onClick={() => changeRunEngagement(filter.value)}
+                      style={{
+                        padding: '0.4rem 0.8rem', borderRadius: 8,
+                        background: runContactsEngagement === filter.value ? '#EF4444' : 'rgba(255,255,255,0.03)',
+                        border: runContactsEngagement === filter.value ? 'none' : '1px solid rgba(255,255,255,0.05)',
+                        color: runContactsEngagement === filter.value ? 'white' : '#8C8C8C',
+                        fontSize: '0.65rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.03em', cursor: 'pointer',
+                      }}
+                    >
+                      {filter.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div
                 className="custom-scrollbar"
                 onScroll={handleRunContactsScroll}
@@ -2076,6 +2139,8 @@ export default function BroadcastPage() {
                         <th style={{ padding: '0.75rem 1rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', fontSize: '0.65rem' }}>Fecha y hora</th>
                         <th style={{ padding: '0.75rem 1rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', fontSize: '0.65rem' }}>Contacto</th>
                         <th style={{ padding: '0.75rem 1rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', fontSize: '0.65rem' }}>Estado</th>
+                        <th style={{ padding: '0.75rem 1rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', fontSize: '0.65rem' }}>Entrega</th>
+                        <th style={{ padding: '0.75rem 1rem', fontWeight: 800, color: '#444', textTransform: 'uppercase', fontSize: '0.65rem' }}>Respuesta</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2095,6 +2160,8 @@ export default function BroadcastPage() {
                               {c.status === 'sent' ? 'Enviado' : (c.failureLabel || 'Fallido')}
                             </span>
                           </td>
+                          <td style={{ padding: '0.75rem 1rem', color: '#8C8C8C' }}>{c.status === 'sent' ? deliveryLabel(c.deliveryStatus) : '—'}</td>
+                          <td style={{ padding: '0.75rem 1rem', color: '#8C8C8C' }}>{c.status === 'sent' ? engagementLabel(c.engagement) : '—'}</td>
                         </tr>
                       ))}
                     </tbody>

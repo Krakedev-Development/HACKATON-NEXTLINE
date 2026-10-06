@@ -150,15 +150,20 @@ export class BroadcastController {
     @Query('limit') limit?: string,
     @Query('status') status?: string,
     @Query('category') category?: string,
+    @Query('engagement') engagement?: string,
   ) {
     if (status !== undefined && status !== 'sent' && status !== 'failed') {
       throw new BadRequestException('status debe ser "sent" o "failed"');
+    }
+    if (engagement && !['INTERESTED', 'NOT_INTERESTED', 'OTHER_REPLY', 'READ_NO_REPLY', 'NO_READ_RECEIPT'].includes(engagement)) {
+      throw new BadRequestException('engagement inválido');
     }
     return this.broadcast.getBroadcastRunContacts(user.organizationId!, runId, {
       cursor,
       limit: limit ? parseInt(limit, 10) : undefined,
       status: status as 'sent' | 'failed' | undefined,
       category,
+      engagement,
     });
   }
 
