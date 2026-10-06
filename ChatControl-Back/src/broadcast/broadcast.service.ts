@@ -888,12 +888,14 @@ export class BroadcastService {
   async getBroadcastRunContacts(
     organizationId: string,
     runId: string,
-    options: { cursor?: string; limit?: number; status?: 'sent' | 'failed'; category?: string } = {},
+    options: { cursor?: string; limit?: number; status?: 'sent' | 'failed'; category?: string; engagement?: string } = {},
   ): Promise<{
     contacts: Array<{
       name: string | null;
       phone: string;
       status: string;
+      deliveryStatus: string | null;
+      engagement: string | null;
       failureCategory: string | null;
       failureLabel: string | null;
       errorMessage: string | null;
@@ -913,48 +915,123 @@ export class BroadcastService {
         : options.category
           ? { failureCategory: options.category }
           : {};
+    const filterByEngagement = !!options.engagement;
     const logs = await this.prisma.broadcastLog.findMany({
       where: {
         organizationId,
         runId,
-        status: options.status,
-        ...categoryFilter,
+        status: filterByEngagement ? 'sent' : options.status,
+        ...(!filterByEngagement ? categoryFilter : {}),
       },
-      orderBy: { createdAt: 'desc' },
-      take: take + 1,
-      ...(options.cursor ? { cursor: { id: options.cursor }, skip: 1 } : {}),
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      ...(!filterByEngagement ? {
+        take: take + 1,
+        ...(options.cursor ? { cursor: { id: options.cursor }, skip: 1 } : {}),
+      } : {}),
     });
 
-    let nextCursor: string | null = null;
-    if (logs.length > take) {
-      nextCursor = logs.pop()!.id;
-    }
     if (!logs.length) return { contacts: [], nextCursor: null };
 
-    const conversations = await this.prisma.conversation.findMany({
-      where: { id: { in: logs.map((l) => l.conversationId) } },
-      include: { contact: { select: { name: true, phone: true } } },
-    });
-    const contactByConversation = new Map(conversations.map((c) => [c.id, c.contact]));
+    const visibleLogs = filterByEngagement ? logs : logs.slice(0, take);
+    const conversationIds = [...new Set(visibleLogs.map((log) => log.conversationId))];
+    const messageIds = visibleLogs.map((log) => log.messageId).filter((id): id is string => !!id);
 
-    const contacts = logs.map((l) => {
+    const [conversations, outboundMessages] = await Promise.all([
+      this.prisma.conversation.findMany({
+      where: { id: { in: conversationIds } },
+      include: { contact: { select: { name: true, phone: true } } },
+      }),
+      this.prisma.message.findMany({
+        where: { id: { in: messageIds } },
+        select: { id: true, conversationId: true, whatsappMessageId: true, whatsappTimestamp: true, status: true, body: true, metaTemplateName: true },
+      }),
+    ]);
+    const contactByConversation = new Map(conversations.map((c) => [c.id, c.contact]));
+    const messageById = new Map(outboundMessages.map((message) => [message.id, message]));
+
+    const firstSentAt = outboundMessages.reduce<Date | null>((first, message) =>
+      !first || message.whatsappTimestamp < first ? message.whatsappTimestamp : first, null);
+    const [incoming, laterBroadcasts] = firstSentAt ? await Promise.all([
+      this.prisma.message.findMany({
+        where: { conversationId: { in: conversationIds }, direction: MessageDirection.IN, whatsappTimestamp: { gte: firstSentAt } },
+        select: { conversationId: true, body: true, replyToId: true, replyToWamid: true, whatsappTimestamp: true },
+        orderBy: { whatsappTimestamp: 'desc' },
+      }),
+      this.prisma.broadcastLog.findMany({
+        where: { organizationId, conversationId: { in: conversationIds }, status: 'sent', createdAt: { gte: firstSentAt } },
+        select: { id: true, conversationId: true, createdAt: true },
+      }),
+    ]) : [[], []];
+    const incomingByConversation = new Map<string, typeof incoming>();
+    for (const message of incoming) {
+      const rows = incomingByConversation.get(message.conversationId) || [];
+      rows.push(message);
+      incomingByConversation.set(message.conversationId, rows);
+    }
+    const broadcastsByConversation = new Map<string, typeof laterBroadcasts>();
+    for (const log of laterBroadcasts) {
+      const rows = broadcastsByConversation.get(log.conversationId) || [];
+      rows.push(log);
+      broadcastsByConversation.set(log.conversationId, rows);
+    }
+    const normalize = (value: string) => value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+
+    const enriched = visibleLogs.map((l) => {
       const contact = contactByConversation.get(l.conversationId);
+      const outbound = l.messageId ? messageById.get(l.messageId) : null;
+      const nextBroadcastAt = (broadcastsByConversation.get(l.conversationId) || [])
+        .filter((other) => other.id !== l.id && other.createdAt > l.createdAt)
+        .reduce<Date | null>((earliest, other) => !earliest || other.createdAt < earliest ? other.createdAt : earliest, null);
+      const replies = incomingByConversation.get(l.conversationId) || [];
+      const directReplies = outbound ? replies.filter((reply) =>
+        reply.replyToId === outbound.id || reply.replyToWamid === outbound.whatsappMessageId) : [];
+      const templateKey = outbound?.metaTemplateName?.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const isDiplomaTemplate = templateKey === 'diplomadoiaparadocentes' ||
+        (l.type === 'template' && !templateKey && normalize(outbound?.body || '').includes('diplomado en inteligencia artificial aplicada a la docencia'));
+      const buttonReply = isDiplomaTemplate ? directReplies.find((reply) => {
+        const text = normalize(reply.body);
+        return text === 'quiero mas informacion' || text === 'no deseo recibir mas informacion';
+      }) : null;
+      const otherReply = outbound && replies.some((reply) => {
+        if (reply.replyToId === outbound.id || reply.replyToWamid === outbound.whatsappMessageId) return true;
+        if (reply.replyToId || reply.replyToWamid) return false;
+        return reply.whatsappTimestamp >= outbound.whatsappTimestamp &&
+          (!nextBroadcastAt || reply.whatsappTimestamp < nextBroadcastAt);
+      });
+      const deliveryStatus = outbound?.status ?? null;
+      const engagement = l.status !== 'sent' || deliveryStatus === MessageStatus.FAILED ? null
+        : buttonReply ? (normalize(buttonReply.body) === 'quiero mas informacion' ? 'INTERESTED' : 'NOT_INTERESTED')
+        : otherReply ? 'OTHER_REPLY'
+        : deliveryStatus === MessageStatus.READ ? 'READ_NO_REPLY'
+        : deliveryStatus === MessageStatus.SENT || deliveryStatus === MessageStatus.DELIVERED ? 'NO_READ_RECEIPT' : null;
       const refined = l.errorMessage ? classifyWhatsAppFailure({ message: l.errorMessage }) : null;
       const category = (refined?.category && refined.category !== 'OTHER'
         ? refined.category
         : l.failureCategory) as BroadcastFailureCategory | null;
       return {
+        logId: l.id,
         name: contact?.name ?? null,
         phone: contact?.phone ?? '',
         status: l.status,
+        deliveryStatus,
+        engagement,
         failureCategory: category,
         failureLabel: category ? FAILURE_CATEGORY_FILTER_LABELS[category] ?? category : null,
         errorMessage: l.errorMessage,
         createdAt: l.createdAt.toISOString(),
       };
     });
-
-    return { contacts, nextCursor };
+    const filtered = options.engagement ? enriched.filter((row) => row.engagement === options.engagement) : enriched;
+    if (filterByEngagement) {
+      const cursorIndex = options.cursor ? logs.findIndex((log) => log.id === options.cursor) : -1;
+      const start = cursorIndex >= 0 ? cursorIndex + 1 : 0;
+      const eligibleIds = new Set(logs.slice(start).map((log) => log.id));
+      const filteredAfterCursor = filtered.filter((row) => eligibleIds.has(row.logId));
+      const page = filteredAfterCursor.slice(0, take);
+      const hasMore = filteredAfterCursor.length > take;
+      return { contacts: page.map(({ logId, ...row }) => row), nextCursor: hasMore ? page[page.length - 1].logId : null };
+    }
+    return { contacts: filtered.map(({ logId, ...row }) => row), nextCursor: logs.length > take ? visibleLogs[visibleLogs.length - 1].id : null };
   }
 
   /** Vincula una etiqueta a los contactos de un masivo ya enviado (sobrescribe tag previo). */

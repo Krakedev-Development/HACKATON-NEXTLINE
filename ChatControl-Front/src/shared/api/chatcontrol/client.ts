@@ -849,6 +849,8 @@ export interface BroadcastRunContact {
   name: string | null;
   phone: string;
   status: string;
+  deliveryStatus: string | null;
+  engagement: string | null;
   failureCategory: string | null;
   failureLabel: string | null;
   errorMessage: string | null;
@@ -862,13 +864,14 @@ export async function getBroadcastRuns(): Promise<BroadcastRun[]> {
 
 export async function getBroadcastRunContacts(
   runId: string,
-  params: { cursor?: string; limit?: number; status?: 'sent' | 'failed'; category?: string } = {},
+  params: { cursor?: string; limit?: number; status?: 'sent' | 'failed'; category?: string; engagement?: string } = {},
 ): Promise<{ contacts: BroadcastRunContact[]; nextCursor: string | null }> {
   const qs = new URLSearchParams();
   if (params.cursor) qs.set('cursor', params.cursor);
   if (params.limit) qs.set('limit', String(params.limit));
   if (params.status) qs.set('status', params.status);
   if (params.category) qs.set('category', params.category);
+  if (params.engagement) qs.set('engagement', params.engagement);
   const query = qs.toString();
   return api(`/broadcast/runs/${encodeURIComponent(runId)}/contacts${query ? `?${query}` : ''}`);
 }

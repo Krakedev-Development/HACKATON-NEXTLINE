@@ -177,8 +177,13 @@ export class WhatsAppController {
               if (msg) {
                 const newStatus = this.mapWhatsappStatus(st.status);
                 if (newStatus) {
-                  const classification = failureInfo
-                    ? classifyWhatsAppFailure({ code: failureInfo.code, message: failureInfo.message })
+                  const progress = { SENT: 1, DELIVERED: 2, READ: 3 } as Record<string, number>;
+                  const shouldApply = newStatus === MessageStatus.FAILED
+                    ? msg.status !== MessageStatus.READ && msg.status !== MessageStatus.DELIVERED
+                    : msg.status !== MessageStatus.FAILED && (progress[newStatus] ?? 0) >= (progress[msg.status] ?? 0);
+                  if (!shouldApply) continue;
+                  const classification = newStatus === MessageStatus.FAILED
+                    ? classifyWhatsAppFailure({ code: failureInfo?.code, message: failureInfo?.message })
                     : null;
 
                   await this.prisma.message.update({
@@ -186,7 +191,7 @@ export class WhatsAppController {
                     data: {
                       status: newStatus,
                       ...(classification
-                        ? { errorCategory: classification.category, errorDetail: failureInfo!.message || failureInfo!.title || '' }
+                        ? { errorCategory: classification.category, errorDetail: failureInfo?.message || failureInfo?.title || '' }
                         : {}),
                     },
                   });
@@ -204,7 +209,7 @@ export class WhatsAppController {
                       contactName: msg.conversation.contact.name,
                       category: classification.category,
                       label: classification.label,
-                      detail: failureInfo!.message || failureInfo!.title || 'Error desconocido',
+                      detail: failureInfo?.message || failureInfo?.title || 'Error desconocido',
                     });
 
                     // El BroadcastLog de este mensaje se escribió como 'sent' al momento del envío
@@ -216,7 +221,7 @@ export class WhatsAppController {
                       data: {
                         status: 'failed',
                         failureCategory: classification.category,
-                        errorMessage: failureInfo!.message || failureInfo!.title || 'Error desconocido',
+                        errorMessage: failureInfo?.message || failureInfo?.title || 'Error desconocido',
                       },
                     });
                   }
