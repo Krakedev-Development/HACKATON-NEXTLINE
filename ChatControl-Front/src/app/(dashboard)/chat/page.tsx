@@ -22,6 +22,16 @@ import {
   sendMedia,
   getOrgUsers,
   getTags,
+  toggleConversationAi,
+  simulateIncomingMessage,
+  getConversationTrainingStatus,
+  toggleConversationTrainingMode,
+  getFidelTrainingRules,
+  createFidelTrainingRule,
+  toggleFidelTrainingRule,
+  deleteFidelTrainingRule,
+  runSandboxTrainingTurn,
+  type FidelTrainingRule,
   type Conversation,
   type Message,
   type NewMessagePayload,
@@ -299,6 +309,24 @@ export default function ChatPage() {
   const [backfilling, setBackfilling] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
 
+  // Fidel AI, Simulator & Training states
+  const [togglingAi, setTogglingAi] = useState(false);
+  const [simulatorOpen, setSimulatorOpen] = useState(false);
+  const [simulatorTab, setSimulatorTab] = useState<'simulador' | 'entrenamiento' | 'memoria'>('simulador');
+  const [simText, setSimText] = useState('');
+  const [simSending, setSimSending] = useState(false);
+  const [simNotice, setSimNotice] = useState('');
+
+  const [isTrainingMode, setIsTrainingMode] = useState(false);
+  const [togglingTraining, setTogglingTraining] = useState(false);
+  const [fidelRules, setFidelRules] = useState<FidelTrainingRule[]>([]);
+  const [sandboxHistory, setSandboxHistory] = useState<Array<{ role: 'trainer' | 'fidel'; text: string; mode?: string }>>([]);
+  const [sandboxInput, setSandboxInput] = useState('');
+  const [sandboxSending, setSandboxSending] = useState(false);
+  const [newRuleInput, setNewRuleInput] = useState('');
+  const [newRuleCategory, setNewRuleCategory] = useState<string>('ESTILO');
+  const [addingRule, setAddingRule] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   
   const socketRef = useRef<Socket | null>(null);
@@ -331,6 +359,7 @@ export default function ChatPage() {
       }
     }).catch(() => {});
     getTags().then(setTags).catch(() => {});
+    getFidelTrainingRules().then(res => setFidelRules(res.rules || [])).catch(() => {});
     loadConversations();
   }, [mounted, router]);
 
@@ -414,6 +443,29 @@ export default function ChatPage() {
       );
     });
 
+    socket.on('conversation_ai_status_updated', (p: { conversationId: string; isAiActive: boolean }) => {
+      setConversations(prev =>
+        prev.map(c => (c.id === p.conversationId ? { ...c, isAiActive: p.isAiActive } : c))
+      );
+    });
+
+    socket.on('conversation_training_status_updated', (p: { conversationId: string; isTrainingMode: boolean; isAiActive: boolean }) => {
+      if (p.conversationId === selectedIdRef.current) {
+        setIsTrainingMode(p.isTrainingMode);
+      }
+      setConversations(prev =>
+        prev.map(c => (c.id === p.conversationId ? { ...c, isAiActive: p.isAiActive } : c))
+      );
+    });
+
+    socket.on('fidel_rule_learned', (p: { rule: FidelTrainingRule }) => {
+      if (p?.rule) {
+        setFidelRules(prev => [p.rule, ...prev.filter(r => r.id !== p.rule.id)]);
+        setToastMessage(`Fidel aprendió una nueva regla: ${p.rule.instruction}`);
+        setTimeout(() => setToastMessage(''), 5500);
+      }
+    });
+
     socket.on('typing', (p: any) => {
       if (p.userId === myUserIdRef.current || p.conversationId !== selectedIdRef.current) return;
       if (typingStopTimerRef.current) clearTimeout(typingStopTimerRef.current);
@@ -436,13 +488,20 @@ export default function ChatPage() {
     (async () => {
       setLoadingMessages(true);
       try {
-        const [convRes, msgRes] = await Promise.all([
+        const [convRes, msgRes, trainingRes] = await Promise.all([
           getConversation(selectedId),
           getMessages(selectedId),
+          getConversationTrainingStatus(selectedId).catch(() => ({ ok: true, isTrainingMode: false })),
         ]);
         setMessages(msgRes.messages);
         setNextCursor(msgRes.nextCursor);
         setCanSend(convRes.canSend ?? false);
+        setIsTrainingMode(trainingRes?.isTrainingMode === true);
+        if (convRes.conversation) {
+          setConversations(prev =>
+            prev.map(c => (c.id === selectedId ? { ...c, isAiActive: convRes.conversation!.isAiActive === true } : c))
+          );
+        }
         await markConversationAsRead(selectedId);
       } catch (err) {} finally {
         setLoadingMessages(false);
@@ -527,7 +586,7 @@ export default function ChatPage() {
     setConversations(prev =>
       prev.map(c =>
         c.id === selectedId
-          ? { ...c, lastMessagePreview: `Tú: ${text}`, lastMessageAt: Date.now(), unreadCount: 0 }
+          ? { ...c, lastMessagePreview: `Tú: ${text}`, lastMessageAt: Date.now(), unreadCount: 0, isAiActive: false }
           : c
       )
     );
@@ -667,6 +726,127 @@ export default function ChatPage() {
       setReplyInput(res.text || '');
     } catch (err) {} finally {
       setGenerating(false);
+    }
+  }
+
+  async function handleToggleAi() {
+    if (!selectedId || togglingAi) return;
+    const currentConv = conversations.find(c => c.id === selectedId);
+    const nextState = currentConv?.isAiActive === true ? false : true;
+    setTogglingAi(true);
+    try {
+      await toggleConversationAi(selectedId, nextState);
+      setConversations(prev => prev.map(c => c.id === selectedId ? { ...c, isAiActive: nextState } : c));
+    } catch (err: any) {
+      console.error('Error alternando Fidel:', err);
+    } finally {
+      setTogglingAi(false);
+    }
+  }
+
+  async function handleSimulateClientMessage(presetText?: string) {
+    const text = (presetText || simText).trim();
+    if (!text || simSending) return;
+    setSimSending(true);
+    setSimNotice('');
+    try {
+      const currentConv = conversations.find(c => c.id === selectedId);
+      await simulateIncomingMessage({
+        text,
+        phone: currentConv?.phone || '593991112233',
+        contactName: currentConv?.name || 'Cliente Simulado',
+      });
+      setSimText('');
+      setSimNotice('Mensaje enviado. Fidel responderá en breve...');
+      setTimeout(() => setSimNotice(''), 4500);
+    } catch (err: any) {
+      console.error('Error simulando mensaje:', err);
+      setSimNotice('Error al simular mensaje.');
+    } finally {
+      setSimSending(false);
+    }
+  }
+
+  async function handleToggleTrainingMode() {
+    if (!selectedId || togglingTraining) return;
+    const nextState = !isTrainingMode;
+    setTogglingTraining(true);
+    try {
+      const res = await toggleConversationTrainingMode(selectedId, nextState);
+      setIsTrainingMode(res.isTrainingMode);
+      setConversations(prev =>
+        prev.map(c => (c.id === selectedId ? { ...c, isAiActive: res.isAiActive } : c))
+      );
+    } catch (err: any) {
+      console.error('Error alternando Modo Entrenamiento:', err);
+    } finally {
+      setTogglingTraining(false);
+    }
+  }
+
+  async function handleSendSandboxTraining(presetText?: string) {
+    const text = (presetText || sandboxInput).trim();
+    if (!text || sandboxSending) return;
+    const currentHist = sandboxHistory.map(h => ({ role: h.role, text: h.text }));
+    setSandboxInput('');
+    setSandboxSending(true);
+    setSandboxHistory(prev => [...prev, { role: 'trainer', text }]);
+    try {
+      const res = await runSandboxTrainingTurn({
+        message: text,
+        history: currentHist,
+      });
+      setSandboxHistory(prev => [
+        ...prev,
+        { role: 'fidel', text: res.text, mode: res.mode },
+      ]);
+      if (res.learnedRule) {
+        setFidelRules(prev => [res.learnedRule!, ...prev.filter(r => r.id !== res.learnedRule!.id)]);
+      }
+    } catch (err: any) {
+      setSandboxHistory(prev => [
+        ...prev,
+        { role: 'fidel', text: 'Error al procesar el turno de entrenamiento.' },
+      ]);
+    } finally {
+      setSandboxSending(false);
+    }
+  }
+
+  async function handleAddManualRule() {
+    if (!newRuleInput.trim() || addingRule) return;
+    setAddingRule(true);
+    try {
+      const res = await createFidelTrainingRule({
+        instruction: newRuleInput.trim(),
+        category: newRuleCategory,
+      });
+      if (res.rule) {
+        setFidelRules(prev => [res.rule, ...prev.filter(r => r.id !== res.rule.id)]);
+      }
+      setNewRuleInput('');
+    } catch (err: any) {
+      console.error('Error agregando regla:', err);
+    } finally {
+      setAddingRule(false);
+    }
+  }
+
+  async function handleToggleRule(ruleId: string, isActive: boolean) {
+    try {
+      const res = await toggleFidelTrainingRule(ruleId, isActive);
+      setFidelRules(res.rules || []);
+    } catch (err) {
+      console.error('Error alternando regla:', err);
+    }
+  }
+
+  async function handleDeleteRule(ruleId: string) {
+    try {
+      const res = await deleteFidelTrainingRule(ruleId);
+      setFidelRules(res.rules || []);
+    } catch (err) {
+      console.error('Error eliminando regla:', err);
     }
   }
 
@@ -905,6 +1085,96 @@ export default function ChatPage() {
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', position: 'relative' }}>
+                <button
+                  type="button"
+                  onClick={handleToggleAi}
+                  disabled={togglingAi}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                    background: selectedConv?.isAiActive === true ? 'rgba(56, 189, 248, 0.12)' : 'rgba(255, 255, 255, 0.04)',
+                    border: selectedConv?.isAiActive === true ? '1px solid rgba(56, 189, 248, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+                    color: selectedConv?.isAiActive === true ? '#38BDF8' : '#777',
+                    padding: '0.6rem 1rem',
+                    borderRadius: '10px',
+                    fontSize: '0.72rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                  }}
+                  title={selectedConv?.isAiActive === true ? 'Fidel responderá automáticamente. Click para pausarlo.' : 'Fidel está pausado. Click para reactivarlo.'}
+                >
+                  <span>{selectedConv?.isAiActive === true ? 'Fidel Activo' : 'Control Asesor'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (simulatorOpen && simulatorTab === 'simulador') {
+                      setSimulatorOpen(false);
+                    } else {
+                      setSimulatorTab('simulador');
+                      setSimulatorOpen(true);
+                    }
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                    background: simulatorOpen && simulatorTab === 'simulador' ? 'rgba(168, 85, 247, 0.2)' : 'rgba(255, 255, 255, 0.03)',
+                    border: simulatorOpen && simulatorTab === 'simulador' ? '1px solid #A855F7' : '1px solid rgba(255, 255, 255, 0.05)',
+                    color: simulatorOpen && simulatorTab === 'simulador' ? '#C084FC' : '#8C8C8C',
+                    padding: '0.6rem 1rem',
+                    borderRadius: '10px',
+                    fontSize: '0.72rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                  }}
+                  title="Simular mensajes de clientes en tiempo real"
+                >
+                  <span>Simulador Cliente</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (simulatorOpen && (simulatorTab === 'entrenamiento' || simulatorTab === 'memoria')) {
+                      setSimulatorOpen(false);
+                    } else {
+                      setSimulatorTab('entrenamiento');
+                      setSimulatorOpen(true);
+                    }
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                    background:
+                      isTrainingMode || (simulatorOpen && (simulatorTab === 'entrenamiento' || simulatorTab === 'memoria'))
+                        ? 'rgba(16, 185, 129, 0.16)'
+                        : 'rgba(255, 255, 255, 0.03)',
+                    border:
+                      isTrainingMode || (simulatorOpen && (simulatorTab === 'entrenamiento' || simulatorTab === 'memoria'))
+                        ? '1px solid rgba(16, 185, 129, 0.5)'
+                        : '1px solid rgba(255, 255, 255, 0.05)',
+                    color:
+                      isTrainingMode || (simulatorOpen && (simulatorTab === 'entrenamiento' || simulatorTab === 'memoria'))
+                        ? '#34D399'
+                        : '#8C8C8C',
+                    padding: '0.6rem 1rem',
+                    borderRadius: '10px',
+                    fontSize: '0.72rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                  }}
+                  title="Entrenar a Fidel y gestionar sus reglas aprendidas"
+                >
+                  <span>{isTrainingMode ? 'Entrenamiento Activo' : 'Modo Entrenamiento'}</span>
+                </button>
+
                 {userRole === 'ORG_ADMIN' && (
                   <button
                     onClick={() => setAssignModalOpen(true)}
@@ -987,12 +1257,12 @@ export default function ChatPage() {
                             : (isImage || isVideo) && !m.text
                               ? 'transparent'
                               : isAgent
-                                ? 'linear-gradient(135deg, #EF4444 0%, #991B1B 100%)'
+                                ? (m.fromAi ? 'linear-gradient(135deg, #0284C7 0%, #0369A1 100%)' : 'linear-gradient(135deg, #EF4444 0%, #991B1B 100%)')
                                 : '#1A1A1A',
                           color: 'white',
                           fontSize: '0.95rem',
                           lineHeight: '1.5',
-                          boxShadow: isSticker || ((isImage || isVideo) && !m.text) ? 'none' : isAgent ? '0 10px 25px rgba(239, 68, 68, 0.15)' : 'none',
+                          boxShadow: isSticker || ((isImage || isVideo) && !m.text) ? 'none' : isAgent ? (m.fromAi ? '0 10px 25px rgba(2, 132, 199, 0.25)' : '0 10px 25px rgba(239, 68, 68, 0.15)') : 'none',
                           border: isSticker || ((isImage || isVideo) && !m.text) ? 'none' : isAgent ? 'none' : '1px solid rgba(255,255,255,0.05)',
                           overflow: 'hidden'
                         }}>
@@ -1187,7 +1457,12 @@ export default function ChatPage() {
                               )}
                             </div>
                           )}
-                          {m.text && <div style={{ wordBreak: 'break-word' }}>{m.text}</div>}
+                          {isAgent && m.fromAi && (
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', marginBottom: '0.45rem', fontSize: '0.68rem', fontWeight: 800, color: '#BAE6FD', background: 'rgba(0,0,0,0.25)', padding: '0.2rem 0.5rem', borderRadius: '6px' }}>
+                              <span>Fidel (IA de Ventas)</span>
+                            </div>
+                          )}
+                          {m.text && <div style={{ wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>{m.text}</div>}
                           {(m as any).isEdited && <div style={{ fontSize: '0.6rem', color: '#888', fontStyle: 'italic', marginTop: '0.2rem' }}>✏️ Editado</div>}
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: '0.3rem' }}>
@@ -1324,6 +1599,546 @@ export default function ChatPage() {
           </div>
         )}
       </main>
+
+      {/* ── Sidebar: Simulador y Modo Entrenamiento de Fidel ── */}
+      {simulatorOpen && selectedConv && (
+        <aside className="custom-scrollbar" style={{
+          width: '390px',
+          minWidth: '340px',
+          flexShrink: 0,
+          background: '#0B0F19',
+          borderLeft: simulatorTab === 'simulador' ? '1px solid rgba(168, 85, 247, 0.25)' : '1px solid rgba(16, 185, 129, 0.25)',
+          display: 'flex',
+          flexDirection: 'column',
+          overflowY: 'auto',
+          zIndex: 15,
+          padding: '1.25rem',
+          animation: 'slideInRight 0.3s ease-out',
+        }}>
+          {/* Header */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <div>
+              <h3 style={{ fontSize: '0.92rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0, color: '#F8FAFC' }}>
+                {simulatorTab === 'simulador'
+                  ? 'Simulador Cliente'
+                  : simulatorTab === 'entrenamiento'
+                  ? 'Modo Entrenamiento'
+                  : 'Memoria de Fidel'}
+              </h3>
+              <span style={{ fontSize: '0.65rem', color: simulatorTab === 'simulador' ? '#A855F7' : '#34D399', fontWeight: 700 }}>
+                {simulatorTab === 'simulador'
+                  ? 'Ambiente de Pruebas'
+                  : simulatorTab === 'entrenamiento'
+                  ? 'Roleplay y Correcciones en Vivo'
+                  : `${fidelRules.filter(r => r.isActive).length} Reglas Activas`}
+              </span>
+            </div>
+            <button 
+              onClick={() => setSimulatorOpen(false)}
+              style={{ background: 'none', border: 'none', color: '#8C8C8C', cursor: 'pointer', fontSize: '1.2rem', padding: '0.2rem' }}
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* Tabs */}
+          <div style={{ display: 'flex', gap: '0.35rem', background: 'rgba(255,255,255,0.03)', padding: '0.3rem', borderRadius: '12px', marginBottom: '1.1rem', border: '1px solid rgba(255,255,255,0.06)' }}>
+            {[
+              { id: 'simulador', label: 'Simulador' },
+              { id: 'entrenamiento', label: 'Entrenar' },
+              { id: 'memoria', label: `Memoria (${fidelRules.filter(r => r.isActive).length})` },
+            ].map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setSimulatorTab(t.id as any)}
+                style={{
+                  flex: 1,
+                  padding: '0.45rem 0.5rem',
+                  borderRadius: '8px',
+                  border: 'none',
+                  fontSize: '0.7rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  background:
+                    simulatorTab === t.id
+                      ? t.id === 'simulador'
+                        ? 'rgba(168, 85, 247, 0.25)'
+                        : 'rgba(16, 185, 129, 0.22)'
+                      : 'transparent',
+                  color:
+                    simulatorTab === t.id
+                      ? t.id === 'simulador'
+                        ? '#E9D5FF'
+                        : '#6EE7B7'
+                      : '#8C8C8C',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {/* ── TAB 1: SIMULADOR CLIENTE ── */}
+          {simulatorTab === 'simulador' && (
+            <>
+              <div style={{ background: 'rgba(168, 85, 247, 0.08)', border: '1px solid rgba(168, 85, 247, 0.2)', borderRadius: '14px', padding: '0.85rem 1rem', marginBottom: '1rem' }}>
+                <p style={{ margin: 0, fontSize: '0.74rem', color: '#D8B4FE', lineHeight: '1.4' }}>
+                  Envía mensajes fingiendo ser el cliente <strong>{selectedConv.name || selectedConv.phone}</strong>. Fidel responderá en este chat aplicando su base comercial y las reglas aprendidas.
+                </p>
+                {isTrainingMode && (
+                  <div style={{ marginTop: '0.55rem', paddingTop: '0.55rem', borderTop: '1px solid rgba(168, 85, 247, 0.2)', fontSize: '0.7rem', color: '#34D399', fontWeight: 700 }}>
+                    Modo Entrenamiento activo en este chat: también puedes enviar correcciones como Entrenador desde aquí.
+                  </div>
+                )}
+              </div>
+
+              <div style={{ marginBottom: '1.1rem' }}>
+                <span style={{ fontSize: '0.68rem', color: '#888', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '0.5rem' }}>
+                  Preguntas Frecuentes Rápidas:
+                </span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                  {[
+                    'Hola, quiero información del programa de AWS',
+                    '¿Cuánto cuesta y qué incluye el precio?',
+                    '¿Cuándo inicia el curso de IA Practitioner?',
+                    'Somos un grupo de 5 personas de mi empresa, ¿hay descuento?',
+                    '¿El examen de certificación oficial está incluido?',
+                  ].map((preset, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      disabled={simSending}
+                      onClick={() => handleSimulateClientMessage(preset)}
+                      style={{
+                        background: 'rgba(255, 255, 255, 0.03)',
+                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                        borderRadius: '10px',
+                        padding: '0.55rem 0.75rem',
+                        textAlign: 'left',
+                        color: '#E2E8F0',
+                        fontSize: '0.74rem',
+                        cursor: simSending ? 'not-allowed' : 'pointer',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                <label style={{ fontSize: '0.68rem', color: '#888', fontWeight: 800, textTransform: 'uppercase' }}>
+                  O escribe tu propio mensaje:
+                </label>
+                <textarea
+                  value={simText}
+                  onChange={e => setSimText(e.target.value)}
+                  placeholder="Ej: ¿Qué horarios tienen los sábados?"
+                  rows={3}
+                  style={{
+                    width: '100%',
+                    background: '#040404',
+                    border: '1px solid rgba(168, 85, 247, 0.3)',
+                    borderRadius: '12px',
+                    padding: '0.75rem',
+                    color: '#FFF',
+                    fontSize: '0.8rem',
+                    resize: 'none',
+                    outline: 'none',
+                  }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSimulateClientMessage();
+                    }
+                  }}
+                />
+
+                <button
+                  type="button"
+                  disabled={simSending || !simText.trim()}
+                  onClick={() => handleSimulateClientMessage()}
+                  style={{
+                    background: simSending || !simText.trim() ? '#4C1D95' : 'linear-gradient(135deg, #9333EA 0%, #7E22CE 100%)',
+                    border: 'none',
+                    borderRadius: '12px',
+                    padding: '0.75rem',
+                    color: 'white',
+                    fontWeight: 800,
+                    fontSize: '0.78rem',
+                    cursor: simSending || !simText.trim() ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.5rem',
+                    boxShadow: '0 4px 15px rgba(168, 85, 247, 0.25)',
+                  }}
+                >
+                  {simSending ? (
+                    <>
+                      <Spinner size={14} />
+                      <span>Enviando como cliente...</span>
+                    </>
+                  ) : (
+                    <span>Enviar como Cliente</span>
+                  )}
+                </button>
+
+                {simNotice && (
+                  <div style={{ textAlign: 'center', fontSize: '0.72rem', color: '#A78BFA', marginTop: '0.25rem', fontWeight: 600 }}>
+                    {simNotice}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* ── TAB 2: MODO ENTRENAMIENTO (COACH / ROLEPLAY) ── */}
+          {simulatorTab === 'entrenamiento' && (
+            <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: '0.85rem' }}>
+              {/* Toggle para activar entrenamiento directamente en el chat actual */}
+              <div style={{
+                background: isTrainingMode ? 'rgba(16, 185, 129, 0.1)' : 'rgba(255,255,255,0.03)',
+                border: isTrainingMode ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid rgba(255,255,255,0.08)',
+                borderRadius: '12px',
+                padding: '0.75rem 0.9rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.45rem',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.74rem', fontWeight: 800, color: isTrainingMode ? '#34D399' : '#E2E8F0' }}>
+                    Entrenar en el chat de {selectedConv.name || selectedConv.phone}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={togglingTraining}
+                    onClick={handleToggleTrainingMode}
+                    style={{
+                      background: isTrainingMode ? '#10B981' : 'rgba(255,255,255,0.08)',
+                      color: isTrainingMode ? '#042F2E' : '#CBD5E1',
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '0.3rem 0.65rem',
+                      fontSize: '0.68rem',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {isTrainingMode ? 'Activo' : 'Activar'}
+                  </button>
+                </div>
+                <p style={{ margin: 0, fontSize: '0.68rem', color: '#94A3B8', lineHeight: '1.35' }}>
+                  {isTrainingMode
+                    ? 'Fidel escuchará tus correcciones de entrenador directamente en los mensajes entrantes de este chat (WhatsApp o Simulador).'
+                    : 'Actívalo si deseas entrenar a Fidel enviando mensajes desde tu WhatsApp o el Simulador en esta conversación.'}
+                </p>
+              </div>
+
+              {/* Sandbox de Entrenamiento en el Panel */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.68rem', color: '#94A3B8', fontWeight: 800, textTransform: 'uppercase' }}>
+                  Sala de Entrenamiento Rápido:
+                </span>
+                {sandboxHistory.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSandboxHistory([])}
+                    style={{ background: 'none', border: 'none', color: '#64748B', fontSize: '0.66rem', cursor: 'pointer', fontWeight: 700 }}
+                  >
+                    Limpiar sesión
+                  </button>
+                )}
+              </div>
+
+              {/* Mensajes de la sesión de entrenamiento */}
+              <div className="custom-scrollbar" style={{
+                flex: 1,
+                minHeight: '210px',
+                maxHeight: '320px',
+                overflowY: 'auto',
+                background: '#05070B',
+                border: '1px solid rgba(255,255,255,0.06)',
+                borderRadius: '12px',
+                padding: '0.75rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.6rem',
+              }}>
+                {sandboxHistory.length === 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', color: '#64748B', fontSize: '0.72rem' }}>
+                    <p style={{ margin: 0, lineHeight: '1.4', color: '#94A3B8' }}>
+                      Habla con Fidel fingiendo ser un cliente y corrígelo en cualquier momento. Ejemplo:
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => handleSendSandboxTraining('Hola Fidel, voy a fingir que soy un cliente y te iré corrigiendo o mejorando las respuestas para que lo tengas en cuenta.')}
+                      style={{
+                        background: 'rgba(16, 185, 129, 0.08)',
+                        border: '1px solid rgba(16, 185, 129, 0.25)',
+                        borderRadius: '8px',
+                        padding: '0.5rem 0.65rem',
+                        color: '#6EE7B7',
+                        fontSize: '0.7rem',
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Iniciar: &quot;Hola Fidel, voy a fingir que soy un cliente y te iré corrigiendo...&quot;
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSendSandboxTraining('Hola, quiero información de las certificaciones de AWS y precios')}
+                      style={{
+                        background: 'rgba(255, 255, 255, 0.03)',
+                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                        borderRadius: '8px',
+                        padding: '0.5rem 0.65rem',
+                        color: '#CBD5E1',
+                        fontSize: '0.7rem',
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Probar como cliente: &quot;Hola, quiero información de AWS y precios&quot;
+                    </button>
+                  </div>
+                ) : (
+                  sandboxHistory.map((item, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        alignSelf: item.role === 'trainer' ? 'flex-end' : 'flex-start',
+                        maxWidth: '90%',
+                        background:
+                          item.role === 'trainer'
+                            ? 'rgba(16, 185, 129, 0.18)'
+                            : item.mode === 'CORRECTION'
+                            ? 'rgba(56, 189, 248, 0.15)'
+                            : 'rgba(255,255,255,0.06)',
+                        border:
+                          item.role === 'trainer'
+                            ? '1px solid rgba(16, 185, 129, 0.35)'
+                            : item.mode === 'CORRECTION'
+                            ? '1px solid rgba(56, 189, 248, 0.4)'
+                            : '1px solid rgba(255,255,255,0.08)',
+                        borderRadius: '10px',
+                        padding: '0.55rem 0.7rem',
+                        fontSize: '0.74rem',
+                        color: '#F1F5F9',
+                        whiteSpace: 'pre-wrap',
+                        lineHeight: '1.4',
+                      }}
+                    >
+                      <div style={{ fontSize: '0.62rem', fontWeight: 800, marginBottom: '0.2rem', color: item.role === 'trainer' ? '#34D399' : '#38BDF8', textTransform: 'uppercase' }}>
+                        {item.role === 'trainer' ? 'Entrenador / Cliente' : item.mode === 'CORRECTION' ? 'Fidel (Regla Guardada)' : 'Fidel'}
+                      </div>
+                      {item.text}
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Input de entrenamiento */}
+              <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <textarea
+                  value={sandboxInput}
+                  onChange={e => setSandboxInput(e.target.value)}
+                  placeholder='Escribe como cliente o corrige a Fidel (ej: "Entrenador: usa menos emojis y cierra con otra pregunta")'
+                  rows={3}
+                  style={{
+                    width: '100%',
+                    background: '#040404',
+                    border: '1px solid rgba(16, 185, 129, 0.3)',
+                    borderRadius: '12px',
+                    padding: '0.7rem',
+                    color: '#FFF',
+                    fontSize: '0.78rem',
+                    resize: 'none',
+                    outline: 'none',
+                  }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendSandboxTraining();
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={sandboxSending || !sandboxInput.trim()}
+                  onClick={() => handleSendSandboxTraining()}
+                  style={{
+                    background: sandboxSending || !sandboxInput.trim() ? '#064E3B' : '#10B981',
+                    border: 'none',
+                    borderRadius: '10px',
+                    padding: '0.7rem',
+                    color: sandboxSending || !sandboxInput.trim() ? '#A7F3D0' : '#042F2E',
+                    fontWeight: 800,
+                    fontSize: '0.76rem',
+                    cursor: sandboxSending || !sandboxInput.trim() ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.4rem',
+                  }}
+                >
+                  {sandboxSending ? (
+                    <>
+                      <Spinner size={14} />
+                      <span>Procesando con Fidel...</span>
+                    </>
+                  ) : (
+                    <span>Enviar a Fidel</span>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── TAB 3: MEMORIA DE REGLAS APRENDIDAS ── */}
+          {simulatorTab === 'memoria' && (
+            <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: '0.85rem' }}>
+              <div style={{ background: 'rgba(56, 189, 248, 0.08)', border: '1px solid rgba(56, 189, 248, 0.2)', borderRadius: '12px', padding: '0.7rem 0.85rem', fontSize: '0.72rem', color: '#BAE6FD', lineHeight: '1.35' }}>
+                Estas son las reglas y correcciones que Fidel ha guardado en su memoria permanente. Se aplican con prioridad máxima en todas las conversaciones.
+              </div>
+
+              {/* Formulario para agregar regla directa */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '12px', padding: '0.7rem' }}>
+                <span style={{ fontSize: '0.66rem', fontWeight: 800, color: '#94A3B8', textTransform: 'uppercase' }}>
+                  Agregar directriz manual:
+                </span>
+                <textarea
+                  value={newRuleInput}
+                  onChange={e => setNewRuleInput(e.target.value)}
+                  placeholder="Ej: No usar más de 1 emoji por mensaje y preguntar siempre si busca curso para él o para su empresa."
+                  rows={2}
+                  style={{
+                    width: '100%',
+                    background: '#040404',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: '8px',
+                    padding: '0.55rem',
+                    color: '#FFF',
+                    fontSize: '0.74rem',
+                    resize: 'none',
+                    outline: 'none',
+                  }}
+                />
+                <div style={{ display: 'flex', gap: '0.4rem' }}>
+                  <select
+                    value={newRuleCategory}
+                    onChange={e => setNewRuleCategory(e.target.value)}
+                    style={{
+                      background: '#040404',
+                      border: '1px solid rgba(255,255,255,0.12)',
+                      borderRadius: '8px',
+                      color: '#CBD5E1',
+                      fontSize: '0.7rem',
+                      padding: '0.4rem 0.5rem',
+                      outline: 'none',
+                    }}
+                  >
+                    <option value="ESTILO">ESTILO</option>
+                    <option value="COMERCIAL">COMERCIAL</option>
+                    <option value="OBJECIONES">OBJECIONES</option>
+                    <option value="GENERAL">GENERAL</option>
+                  </select>
+                  <button
+                    type="button"
+                    disabled={addingRule || !newRuleInput.trim()}
+                    onClick={handleAddManualRule}
+                    style={{
+                      flex: 1,
+                      background: addingRule || !newRuleInput.trim() ? 'rgba(255,255,255,0.06)' : '#10B981',
+                      color: addingRule || !newRuleInput.trim() ? '#64748B' : '#042F2E',
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '0.45rem',
+                      fontSize: '0.72rem',
+                      fontWeight: 800,
+                      cursor: addingRule || !newRuleInput.trim() ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {addingRule ? 'Guardando...' : 'Guardar Regla'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Lista de reglas */}
+              <div className="custom-scrollbar" style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                {fidelRules.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '2rem 1rem', color: '#64748B', fontSize: '0.74rem' }}>
+                    Aún no hay reglas entrenadas en memoria. Usa la pestaña Entrenar o agrega una directriz arriba.
+                  </div>
+                ) : (
+                  fidelRules.map(rule => (
+                    <div
+                      key={rule.id}
+                      style={{
+                        background: rule.isActive ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.015)',
+                        border: rule.isActive ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(255,255,255,0.05)',
+                        borderRadius: '10px',
+                        padding: '0.65rem 0.75rem',
+                        opacity: rule.isActive ? 1 : 0.55,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.35rem',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.62rem', fontWeight: 800, color: '#34D399', background: 'rgba(16, 185, 129, 0.12)', padding: '0.15rem 0.45rem', borderRadius: '4px' }}>
+                          {rule.category}
+                        </span>
+                        <div style={{ display: 'flex', gap: '0.4rem' }}>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleRule(rule.id, !rule.isActive)}
+                            style={{
+                              background: 'none',
+                              border: '1px solid rgba(255,255,255,0.12)',
+                              borderRadius: '6px',
+                              color: rule.isActive ? '#E2E8F0' : '#94A3B8',
+                              fontSize: '0.62rem',
+                              padding: '0.15rem 0.45rem',
+                              cursor: 'pointer',
+                              fontWeight: 700,
+                            }}
+                          >
+                            {rule.isActive ? 'Activa' : 'Pausada'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteRule(rule.id)}
+                            style={{
+                              background: 'rgba(239, 68, 68, 0.12)',
+                              border: '1px solid rgba(239, 68, 68, 0.3)',
+                              borderRadius: '6px',
+                              color: '#F87171',
+                              fontSize: '0.62rem',
+                              padding: '0.15rem 0.45rem',
+                              cursor: 'pointer',
+                              fontWeight: 700,
+                            }}
+                          >
+                            Eliminar
+                          </button>
+                        </div>
+                      </div>
+                      <div style={{ fontSize: '0.74rem', color: '#F1F5F9', lineHeight: '1.35' }}>
+                        {rule.instruction}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+        </aside>
+      )}
 
       {/* ── Sidebar: Detalles de Contacto ── */}
       {detailsOpen && selectedConv && (

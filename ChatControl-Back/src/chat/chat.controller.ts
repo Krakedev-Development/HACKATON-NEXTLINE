@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -12,7 +13,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { UserRole } from '@prisma/client';
+import { UserRole, MessageType } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -22,7 +23,7 @@ import { OrgMemberGuard } from '../auth/org-member.guard';
 import { ChatService } from './chat.service';
 import { StorageService } from '../common/storage.service';
 import { LeadAssignmentService } from '../lead-assignment/lead-assignment.service';
-import { IsNotEmpty, IsString, IsOptional } from 'class-validator';
+import { IsNotEmpty, IsString, IsOptional, IsBoolean, IsArray } from 'class-validator';
 
 class SendMessageDto {
   @IsString()
@@ -38,6 +39,59 @@ class AssignConversationDto {
   @IsOptional()
   @IsString()
   assignToUserId?: string | null;
+}
+
+class ToggleAiDto {
+  @IsBoolean()
+  isAiActive!: boolean;
+}
+
+class ToggleTrainingDto {
+  @IsBoolean()
+  isTrainingMode!: boolean;
+}
+
+class CreateFidelRuleDto {
+  @IsString()
+  @IsNotEmpty()
+  instruction!: string;
+
+  @IsOptional()
+  @IsString()
+  category?: string;
+
+  @IsOptional()
+  @IsString()
+  sourceFeedback?: string;
+}
+
+class ToggleFidelRuleDto {
+  @IsBoolean()
+  isActive!: boolean;
+}
+
+class SandboxTrainingTurnDto {
+  @IsString()
+  @IsNotEmpty()
+  message!: string;
+
+  @IsOptional()
+  @IsArray()
+  history?: Array<{ role: 'trainer' | 'fidel'; text: string }>;
+}
+
+class SimulateMessageDto {
+  @IsOptional()
+  @IsString()
+  phone?: string;
+
+  @IsString()
+  @IsNotEmpty()
+  text!: string;
+
+  @IsOptional()
+  @IsString()
+  contactName?: string;
 }
 
 @Controller('chat')
@@ -184,4 +238,120 @@ export class ChatController {
     await this.chat.assignConversation(id, user.organizationId!, dto.assignToUserId ?? null);
     return { ok: true };
   }
+
+  @Patch('conversations/:id/toggle-ai')
+  async toggleAi(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() body: ToggleAiDto,
+  ) {
+    if (!user.organizationId) throw new BadRequestException('Usuario sin organización');
+    const isAiActive = await this.chat.setConversationAiActive(id, user.organizationId, body.isAiActive);
+    return { ok: true, isAiActive };
+  }
+
+  @Post('simulator/message')
+  async simulateMessage(
+    @CurrentUser() user: AuthUser,
+    @Body() body: SimulateMessageDto,
+  ) {
+    if (!user.organizationId) throw new BadRequestException('Usuario sin organización');
+    if (!body.text?.trim()) throw new BadRequestException('El texto del mensaje es obligatorio');
+
+    const phone = body.phone?.trim() || '593999999999';
+    const contactName = body.contactName?.trim() || 'Cliente Simulado';
+    const messageId = `sim_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+
+    await this.chat.registerIncomingMessage({
+      organizationId: user.organizationId,
+      from: phone,
+      contactName,
+      messageId,
+      timestamp: Date.now(),
+      text: body.text.trim(),
+      type: MessageType.TEXT,
+    });
+
+    return { ok: true, simulatedMessageId: messageId };
+  }
+
+  @Get('conversations/:id/training-status')
+  async getTrainingStatus(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+  ) {
+    if (!user.organizationId) throw new BadRequestException('Usuario sin organización');
+    const isTrainingMode = await this.chat.isConversationInTrainingMode(id, user.organizationId);
+    return { ok: true, isTrainingMode };
+  }
+
+  @Patch('conversations/:id/toggle-training')
+  async toggleTrainingMode(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() body: ToggleTrainingDto,
+  ) {
+    if (!user.organizationId) throw new BadRequestException('Usuario sin organización');
+    const res = await this.chat.setConversationTrainingMode(id, user.organizationId, body.isTrainingMode);
+    return { ok: true, ...res };
+  }
+
+  @Get('fidel/rules')
+  async getFidelRules(@CurrentUser() user: AuthUser) {
+    if (!user.organizationId) throw new BadRequestException('Usuario sin organización');
+    const rules = await this.chat.getFidelRules(user.organizationId);
+    return { ok: true, rules };
+  }
+
+  @Post('fidel/rules')
+  async createFidelRule(
+    @CurrentUser() user: AuthUser,
+    @Body() body: CreateFidelRuleDto,
+  ) {
+    if (!user.organizationId) throw new BadRequestException('Usuario sin organización');
+    const rule = await this.chat.addFidelRule(user.organizationId, {
+      instruction: body.instruction,
+      category: body.category,
+      sourceFeedback: body.sourceFeedback,
+      createdByName: user.email || 'Entrenador',
+    });
+    return { ok: true, rule };
+  }
+
+  @Patch('fidel/rules/:ruleId')
+  async toggleFidelRule(
+    @CurrentUser() user: AuthUser,
+    @Param('ruleId') ruleId: string,
+    @Body() body: ToggleFidelRuleDto,
+  ) {
+    if (!user.organizationId) throw new BadRequestException('Usuario sin organización');
+    const rules = await this.chat.toggleFidelRule(user.organizationId, ruleId, body.isActive);
+    return { ok: true, rules };
+  }
+
+  @Delete('fidel/rules/:ruleId')
+  async deleteFidelRule(
+    @CurrentUser() user: AuthUser,
+    @Param('ruleId') ruleId: string,
+  ) {
+    if (!user.organizationId) throw new BadRequestException('Usuario sin organización');
+    const rules = await this.chat.deleteFidelRule(user.organizationId, ruleId);
+    return { ok: true, rules };
+  }
+
+  @Post('fidel/training-turn')
+  async runSandboxTrainingTurn(
+    @CurrentUser() user: AuthUser,
+    @Body() body: SandboxTrainingTurnDto,
+  ) {
+    if (!user.organizationId) throw new BadRequestException('Usuario sin organización');
+    const res = await this.chat.runSandboxTrainingTurn(
+      user.organizationId,
+      body.history || [],
+      body.message,
+      user.email || 'Entrenador',
+    );
+    return { ok: true, ...res };
+  }
 }
+
