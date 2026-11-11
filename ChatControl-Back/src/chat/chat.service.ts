@@ -880,6 +880,7 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
   }
 
   private readonly fidelDebounceTimers = new Map<string, NodeJS.Timeout>();
+  private readonly conversationIntelCache = new Map<string, any>();
   private readonly processedIncomingMsgIds = new Set<string>();
   private readonly startedAt = new Date();
   private remotePollerTimer: NodeJS.Timeout | null = null;
@@ -1022,18 +1023,26 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
 
       replyText = mcpResult.replyText.trim();
 
-      // Emitir inteligencia comercial del turno vía WebSocket para la Ficha MCP en ChatControl-Front
-      this.chatGateway.server?.to(`org:${organizationId}`)?.emit('fidel_mcp_intel', {
+      // Guardar en caché el resultado enriquecido del turno comercial
+      const intelPayload = {
         conversationId,
+        sessionId: conversationId,
         intentLevel: mcpResult.intentLevel,
         intentJustification: mcpResult.intentJustification,
         detectedProductKey: mcpResult.detectedProductKey,
+        activeProductKey: mcpResult.detectedProductKey,
         extractedFields: mcpResult.extractedFields,
         mcpExecutions: mcpResult.mcpExecutions,
         nextAction: mcpResult.nextAction,
         incrementalSummary: mcpResult.incrementalSummary,
+        status: mcpResult.status,
         timestamp: Date.now(),
-      });
+      };
+      this.conversationIntelCache.set(conversationId, intelPayload);
+
+      // Emitir inteligencia comercial del turno vía WebSocket para la Ficha MCP en ChatControl-Front
+      this.chatGateway.server?.to(`org:${organizationId}`)?.emit('fidel_mcp_intel', intelPayload);
+      this.chatGateway.server?.to(`conversation:${conversationId}`)?.emit('fidel_mcp_intel', intelPayload);
     } catch (err: any) {
       this.logger.error(`Error consultando a Fidel MCP para conv=${conversationId}:`, err);
       try {
@@ -1114,16 +1123,34 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
   async getFidelConversationIntel(conversationId: string, organizationId: string) {
     await this.assertConversationInOrg(conversationId, organizationId);
     const session = await this.fidelMcp.getSessionState(conversationId);
+    const cached = this.conversationIntelCache.get(conversationId);
+
+    const activeProduct =
+      cached?.detectedProductKey ||
+      cached?.activeProductKey ||
+      session?.activeProductKey;
+
+    const extracted =
+      session?.extractedFields && session.extractedFields.length > 0
+        ? session.extractedFields
+        : (cached?.extractedFields || []);
+
     return {
       ok: true,
       conversationId,
-      intel: session
+      intel: session || cached
         ? {
-            status: session.status,
-            activeProductKey: session.activeProductKey,
-            extractedFields: session.extractedFields,
-            incrementalSummary: session.incrementalSummary,
-            messagesCount: session.messagesCount,
+            status: session?.status || cached?.status || 'AI_ACTIVE',
+            activeProductKey: activeProduct,
+            detectedProductKey: activeProduct,
+            intentLevel: cached?.intentLevel || (session?.messagesCount && session.messagesCount > 0 ? 'MEDIO' : undefined),
+            intentJustification: cached?.intentJustification || (activeProduct === 'custom_software' ? 'Interés en desarrollo a la medida de software con IA.' : undefined),
+            extractedFields: extracted,
+            mcpExecutions: cached?.mcpExecutions || [],
+            nextAction: cached?.nextAction,
+            incrementalSummary: session?.incrementalSummary || cached?.incrementalSummary || '',
+            messagesCount: session?.messagesCount ?? cached?.messagesCount ?? 0,
+            timestamp: cached?.timestamp || Date.now(),
           }
         : null,
     };

@@ -314,7 +314,7 @@ export default function ChatPage() {
   // Fidel AI, Simulator & Training states
   const [togglingAi, setTogglingAi] = useState(false);
   const [simulatorOpen, setSimulatorOpen] = useState(false);
-  const [simulatorTab, setSimulatorTab] = useState<'simulador' | 'mcp_intel' | 'memoria'>('simulador');
+  const [simulatorTab, setSimulatorTab] = useState<'simulador' | 'mcp_intel'>('simulador');
   const [simText, setSimText] = useState('');
   const [simSending, setSimSending] = useState(false);
   const [simNotice, setSimNotice] = useState('');
@@ -1655,18 +1655,10 @@ export default function ChatPage() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
             <div>
               <h3 style={{ fontSize: '0.92rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0, color: '#F8FAFC' }}>
-                {simulatorTab === 'simulador'
-                  ? 'Simulador Cliente'
-                  : simulatorTab === 'mcp_intel'
-                  ? 'Ficha Comercial MCP'
-                  : 'Memoria de Fidel'}
+                {simulatorTab === 'simulador' ? 'Simulador Cliente' : 'Ficha Comercial MCP'}
               </h3>
-              <span style={{ fontSize: '0.65rem', color: simulatorTab === 'simulador' ? '#A855F7' : simulatorTab === 'mcp_intel' ? '#34D399' : '#38BDF8', fontWeight: 700 }}>
-                {simulatorTab === 'simulador'
-                  ? 'Ambiente de Pruebas'
-                  : simulatorTab === 'mcp_intel'
-                  ? 'Inteligencia en Tiempo Real & Tools'
-                  : `${fidelRules.filter(r => r.isActive).length} Reglas Activas`}
+              <span style={{ fontSize: '0.65rem', color: simulatorTab === 'simulador' ? '#A855F7' : '#34D399', fontWeight: 700 }}>
+                {simulatorTab === 'simulador' ? 'Ambiente de Pruebas' : 'Inteligencia en Tiempo Real & Tools'}
               </span>
             </div>
             <button 
@@ -1682,7 +1674,6 @@ export default function ChatPage() {
             {[
               { id: 'simulador', label: 'Simulador' },
               { id: 'mcp_intel', label: 'Ficha MCP' },
-              { id: 'memoria', label: `Memoria (${fidelRules.filter(r => r.isActive).length})` },
             ].map((t) => (
               <button
                 key={t.id}
@@ -1700,17 +1691,13 @@ export default function ChatPage() {
                     simulatorTab === t.id
                       ? t.id === 'simulador'
                         ? 'rgba(168, 85, 247, 0.25)'
-                        : t.id === 'mcp_intel'
-                        ? 'rgba(16, 185, 129, 0.22)'
-                        : 'rgba(56, 189, 248, 0.22)'
+                        : 'rgba(16, 185, 129, 0.22)'
                       : 'transparent',
                   color:
                     simulatorTab === t.id
                       ? t.id === 'simulador'
                         ? '#E9D5FF'
-                        : t.id === 'mcp_intel'
-                        ? '#6EE7B7'
-                        : '#7DD3FC'
+                        : '#6EE7B7'
                       : '#8C8C8C',
                   transition: 'all 0.15s',
                 }}
@@ -1865,7 +1852,9 @@ export default function ChatPage() {
                     setLoadingMcpIntel(true);
                     try {
                       const res = await getFidelConversationIntel(selectedId);
-                      setMcpIntel(res?.intel || null);
+                      if (res?.intel) {
+                        setMcpIntel(prev => ({ ...(prev || {}), ...res.intel }));
+                      }
                     } finally {
                       setLoadingMcpIntel(false);
                     }
@@ -1951,37 +1940,43 @@ export default function ChatPage() {
                   Línea de Producto Detectada
                 </span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  {mcpIntel?.detectedProductKey ? (
-                    <div style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '0.4rem',
-                      padding: '0.4rem 0.75rem',
-                      borderRadius: '8px',
-                      background: 'rgba(168, 85, 247, 0.15)',
-                      border: '1px solid rgba(168, 85, 247, 0.4)',
-                      color: '#E9D5FF',
-                      fontSize: '0.76rem',
-                      fontWeight: 700,
-                    }}>
-                      <span>📦</span>
-                      <span>
-                        {mcpIntel.detectedProductKey === 'ia_docencia'
-                          ? 'Diplomado IA Generativa para Docencia ($350)'
-                          : mcpIntel.detectedProductKey === 'aws_pack'
-                          ? 'Pack Dual Certificaciones AWS ($500)'
-                          : mcpIntel.detectedProductKey === 'krake_mentor'
-                          ? 'Krake Mentor - Carrera Fullstack & IA'
-                          : mcpIntel.detectedProductKey === 'custom_software'
-                          ? 'Software a Medida & Arquitectura Cloud'
-                          : mcpIntel.detectedProductKey}
-                      </span>
-                    </div>
-                  ) : (
-                    <span style={{ fontSize: '0.72rem', color: '#64748B', fontStyle: 'italic' }}>
-                      No se ha identificado producto específico aún en el diálogo.
-                    </span>
-                  )}
+                  {(() => {
+                    const prod = mcpIntel?.detectedProductKey || mcpIntel?.activeProductKey;
+                    if (!prod) {
+                      return (
+                        <span style={{ fontSize: '0.72rem', color: '#64748B', fontStyle: 'italic' }}>
+                          No se ha identificado producto específico aún en el diálogo.
+                        </span>
+                      );
+                    }
+                    return (
+                      <div style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.4rem',
+                        padding: '0.4rem 0.75rem',
+                        borderRadius: '8px',
+                        background: 'rgba(168, 85, 247, 0.15)',
+                        border: '1px solid rgba(168, 85, 247, 0.4)',
+                        color: '#E9D5FF',
+                        fontSize: '0.76rem',
+                        fontWeight: 700,
+                      }}>
+                        <span>📦</span>
+                        <span>
+                          {prod === 'ia_docencia'
+                            ? 'Diplomado IA Generativa para Docencia ($350)'
+                            : prod === 'aws_pack'
+                            ? 'Pack Dual Certificaciones AWS ($500)'
+                            : prod === 'krake_mentor'
+                            ? 'Krake Mentor - Carrera Fullstack & IA'
+                            : prod === 'custom_software'
+                            ? 'Software a Medida & Arquitectura Cloud'
+                            : prod}
+                        </span>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 
@@ -2096,7 +2091,7 @@ export default function ChatPage() {
           )}
 
           {/* ── TAB 3: MEMORIA DE REGLAS APRENDIDAS ── */}
-          {simulatorTab === 'memoria' && (
+          {false && (
             <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: '0.85rem' }}>
               <div style={{ background: 'rgba(56, 189, 248, 0.08)', border: '1px solid rgba(56, 189, 248, 0.2)', borderRadius: '12px', padding: '0.7rem 0.85rem', fontSize: '0.72rem', color: '#BAE6FD', lineHeight: '1.35' }}>
                 Estas son las reglas y correcciones que Fidel ha guardado en su memoria permanente. Se aplican con prioridad máxima en todas las conversaciones.
