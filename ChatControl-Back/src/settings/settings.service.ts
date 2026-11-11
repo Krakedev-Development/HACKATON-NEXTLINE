@@ -13,7 +13,7 @@ const TIER_DAILY_LIMITS: Record<WhatsappTier, number> = {
   excellent: Number.MAX_SAFE_INTEGER,
 };
 
-const DEFAULT_FALLBACK_GEMINI_MODEL = 'gemini-2.5-flash';
+const DEFAULT_FALLBACK_GEMINI_MODEL = 'gemini-3.5-flash';
 
 @Injectable()
 export class SettingsService {

@@ -146,6 +146,7 @@ export interface Conversation {
   unreadCount?: number;
   assignedToUserId?: string | null;
   isNewLead?: boolean;
+  isAiActive?: boolean;
   adReferral?: AdReferral | null;
 }
 
@@ -281,6 +282,64 @@ export async function generateReply(
 ): Promise<{ ok: boolean; text: string; usedFallbackModel?: boolean }> {
   return api(`/chat/conversations/${conversationId}/generate-reply`, {
     method: 'POST',
+  });
+}
+
+export async function toggleConversationAi(
+  conversationId: string,
+  isAiActive: boolean,
+): Promise<{ ok: boolean; isAiActive: boolean }> {
+  return api(`/chat/conversations/${conversationId}/toggle-ai`, {
+    method: 'PATCH',
+    body: JSON.stringify({ isAiActive }),
+  });
+}
+
+export async function simulateIncomingMessage(params: {
+  text: string;
+  phone?: string;
+  contactName?: string;
+}): Promise<{ ok: boolean; simulatedMessageId: string }> {
+  return api('/chat/simulator/message', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export interface FidelMcpIntel {
+  sessionId?: string;
+  tenantId?: string;
+  status?: string;
+  activeProductKey?: string;
+  intentLevel?: 'ALTO' | 'MEDIO' | 'BAJO' | string;
+  intentJustification?: string;
+  detectedProductKey?: string;
+  extractedFields?: Array<{ key?: string; field?: string; value?: string; status?: 'captured' | 'partial' | 'missing' | string }>;
+  mcpExecutions?: Array<{ tool?: string; toolName?: string; success?: boolean; message?: string; output?: any; data?: any; timestamp?: any }>;
+  nextAction?: string;
+  incrementalSummary?: string;
+  timestamp?: number;
+}
+
+export async function getFidelConversationIntel(
+  conversationId: string,
+): Promise<{ ok: boolean; conversationId: string; intel: FidelMcpIntel | null }> {
+  return api(`/chat/conversations/${conversationId}/fidel-intel`, {
+    method: 'GET',
+  });
+}
+
+export async function getFidelGlobalAiStatus(): Promise<{ ok: boolean; enabled: boolean }> {
+  return api('/chat/fidel-global');
+}
+
+export async function setFidelGlobalAiStatus(
+  enabled: boolean,
+  applyToExisting?: boolean,
+): Promise<{ ok: boolean; enabled: boolean; updatedCount?: number }> {
+  return api('/chat/fidel-global', {
+    method: 'POST',
+    body: JSON.stringify({ enabled, applyToExisting }),
   });
 }
 
@@ -1205,4 +1264,79 @@ export async function getAgentContactMap(
     body: JSON.stringify({ agentIds, dateFrom, dateTo, interestStatus }),
   });
 }
+
+export interface FidelTrainingRule {
+  id: string;
+  instruction: string;
+  category: string;
+  sourceFeedback?: string;
+  createdByName?: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export async function getConversationTrainingStatus(
+  conversationId: string,
+): Promise<{ ok: boolean; isTrainingMode: boolean }> {
+  return api(`/chat/conversations/${conversationId}/training-status`);
+}
+
+export async function toggleConversationTrainingMode(
+  conversationId: string,
+  isTrainingMode: boolean,
+): Promise<{ ok: boolean; isTrainingMode: boolean; isAiActive: boolean }> {
+  return api(`/chat/conversations/${conversationId}/toggle-training`, {
+    method: 'PATCH',
+    body: JSON.stringify({ isTrainingMode }),
+  });
+}
+
+export async function getFidelTrainingRules(): Promise<{ ok: boolean; rules: FidelTrainingRule[] }> {
+  return api('/chat/fidel/rules');
+}
+
+export async function createFidelTrainingRule(body: {
+  instruction: string;
+  category?: string;
+  sourceFeedback?: string;
+}): Promise<{ ok: boolean; rule: FidelTrainingRule }> {
+  return api('/chat/fidel/rules', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function toggleFidelTrainingRule(
+  ruleId: string,
+  isActive: boolean,
+): Promise<{ ok: boolean; rules: FidelTrainingRule[] }> {
+  return api(`/chat/fidel/rules/${ruleId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ isActive }),
+  });
+}
+
+export async function deleteFidelTrainingRule(
+  ruleId: string,
+): Promise<{ ok: boolean; rules: FidelTrainingRule[] }> {
+  return api(`/chat/fidel/rules/${ruleId}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function runSandboxTrainingTurn(body: {
+  message: string;
+  history: Array<{ role: 'trainer' | 'fidel'; text: string }>;
+}): Promise<{
+  ok: boolean;
+  text: string;
+  mode: 'SETUP' | 'ROLEPLAY' | 'CORRECTION';
+  learnedRule: FidelTrainingRule | null;
+}> {
+  return api('/chat/fidel/training-turn', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 

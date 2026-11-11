@@ -241,6 +241,7 @@ model Conversation {
   createdAt         DateTime  @default(now())
   lastReadAt        DateTime?
   isNewLead         Boolean   @default(false)
+  isAiActive        Boolean   @default(false)
   assignedToUserId  String?
   assignedAt        DateTime?
   autoMessageDetectedAt DateTime?

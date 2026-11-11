@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, ForbiddenException, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, BadRequestException, ForbiddenException, NotFoundException, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MessageDirection, MessageStatus, MessageType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -12,6 +12,7 @@ import { StorageService } from '../common/storage.service';
 import { normalizePhone } from '../common/phone.util';
 import { ensureWhatsAppCompatibleVideo, withMp4Extension, WHATSAPP_VIDEO_MAX_BYTES } from '../common/video-transcode.util';
 import { ConversationsQueryService } from './conversations-query.service';
+import { FidelMcpClientService } from '../ai/fidel-mcp-client.service';
 
 export interface Message {
   id: string;
@@ -64,11 +65,12 @@ export interface Conversation {
   unreadCount: number;
   assignedToUserId?: string | null;
   isNewLead?: boolean;
+  isAiActive?: boolean;
   adReferral?: any;
 }
 
 @Injectable()
-export class ChatService {
+export class ChatService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ChatService.name);
 
   constructor(
@@ -82,6 +84,7 @@ export class ChatService {
     private readonly leadAssignment: LeadAssignmentService,
     private readonly storage: StorageService,
     private readonly conversationsQuery: ConversationsQueryService,
+    private readonly fidelMcp: FidelMcpClientService,
   ) {}
 
   async registerIncomingMessage(payload: {
@@ -146,12 +149,14 @@ export class ChatService {
     const isNewConversation = !conversation;
 
     if (!conversation) {
+      const isGlobalAiActive = await this.getFidelGlobalAiStatus(payload.organizationId);
       conversation = await this.prisma.conversation.create({
         data: {
           contactId: contact.id,
           lastUserMessageAt: new Date(payload.timestamp),
           campaignId: activeCampaignId,
           adReferral: payload.referral ? (payload.referral as any) : undefined,
+          isAiActive: isGlobalAiActive,
         },
       });
     } else {
@@ -272,6 +277,7 @@ export class ChatService {
           referral: payload.referral ? (payload.referral as any) : undefined,
         },
       });
+      this.processedIncomingMsgIds.add(created.id);
 
       let interestApplied = false;
       if (interestStatus) {
@@ -312,6 +318,9 @@ export class ChatService {
           referral: created.referral,
         } as any,
       );
+
+      // Respuesta automática de Fidel si la IA está activa
+      this.triggerFidelAutoReply(payload.organizationId, conversation.id, contact.phone);
     }
   }
 
@@ -624,6 +633,19 @@ export class ChatService {
         replyToId: replyToSnapshot?.id,
       },
     });
+
+    if (!params.fromAi) {
+      this.cancelFidelAutoReply(params.conversationId);
+      await this.prisma.conversation.update({
+        where: { id: params.conversationId },
+        data: { isAiActive: false },
+      });
+      this.chatGateway.server?.to(`org:${params.organizationId}`)?.emit('conversation_ai_status_updated', {
+        conversationId: params.conversationId,
+        isAiActive: false,
+      });
+    }
+
     const msg: Message = {
       id: created.id,
       conversationId: created.conversationId,
@@ -858,4 +880,424 @@ export class ChatService {
       throw new ForbiddenException('No tienes acceso a esta conversación');
     }
   }
+
+  private readonly fidelDebounceTimers = new Map<string, NodeJS.Timeout>();
+  private readonly conversationIntelCache = new Map<string, any>();
+  private readonly processedIncomingMsgIds = new Set<string>();
+  private readonly startedAt = new Date();
+  private remotePollerTimer: NodeJS.Timeout | null = null;
+  private isPollingRemote = false;
+
+  onModuleInit(): void {
+    this.remotePollerTimer = setInterval(() => {
+      void this.pollRemoteIncomingMessages();
+    }, 2500);
+  }
+
+  onModuleDestroy(): void {
+    if (this.remotePollerTimer) {
+      clearInterval(this.remotePollerTimer);
+      this.remotePollerTimer = null;
+    }
+    for (const timer of this.fidelDebounceTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.fidelDebounceTimers.clear();
+  }
+
+  private async pollRemoteIncomingMessages(): Promise<void> {
+    if (this.isPollingRemote) return;
+    this.isPollingRemote = true;
+    try {
+      const recentCutoff = new Date(Date.now() - 30_000);
+      const convs = await this.prisma.conversation.findMany({
+        where: {
+          OR: [
+            { isAiActive: true },
+            { lastUserMessageAt: { gte: recentCutoff } },
+          ],
+        },
+        include: {
+          contact: true,
+          messages: {
+            orderBy: { whatsappTimestamp: 'desc' },
+            take: 1,
+          },
+        },
+      });
+
+      for (const conv of convs) {
+        const lastMsg = conv.messages[0];
+        if (!lastMsg) continue;
+        if (lastMsg.direction !== MessageDirection.IN) continue;
+        if (lastMsg.createdAt < this.startedAt) continue;
+        if (this.processedIncomingMsgIds.has(lastMsg.id)) continue;
+
+        this.processedIncomingMsgIds.add(lastMsg.id);
+
+        this.chatGateway.emitNewMessage(conv.contact.organizationId, conv.id, {
+          id: lastMsg.id,
+          conversationId: conv.id,
+          fromUser: true,
+          text: lastMsg.body,
+          timestamp: lastMsg.whatsappTimestamp.getTime(),
+          mediaUrl: lastMsg.mediaUrl,
+          mimeType: lastMsg.mimeType,
+          fileName: lastMsg.fileName,
+          type: lastMsg.type,
+          status: lastMsg.status,
+        } as any);
+
+        if (conv.isAiActive === true) {
+          this.logger.log(`Mensaje remoto detectado en conv=${conv.id} con Fidel activo. Disparando respuesta...`);
+          this.triggerFidelAutoReply(conv.contact.organizationId, conv.id, conv.contact.phone);
+        }
+      }
+    } catch (err) {
+      // Silenciar errores transitorios de red en polling
+    } finally {
+      this.isPollingRemote = false;
+    }
+  }
+
+  cancelFidelAutoReply(conversationId: string): void {
+    const existing = this.fidelDebounceTimers.get(conversationId);
+    if (existing) {
+      clearTimeout(existing);
+      this.fidelDebounceTimers.delete(conversationId);
+    }
+  }
+
+  triggerFidelAutoReply(organizationId: string, conversationId: string, contactPhone: string, delayMs = 3000): void {
+    this.cancelFidelAutoReply(conversationId);
+
+    const timer = setTimeout(async () => {
+      this.fidelDebounceTimers.delete(conversationId);
+      try {
+        await this.executeFidelReply(organizationId, conversationId, contactPhone);
+      } catch (err) {
+        this.logger.error(`Error en respuesta automática de Fidel para conv=${conversationId}:`, err);
+      }
+    }, delayMs);
+
+    this.fidelDebounceTimers.set(conversationId, timer);
+  }
+
+  async executeFidelReply(organizationId: string, conversationId: string, contactPhone: string): Promise<Message | null> {
+    const conv = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { isAiActive: true },
+    });
+    if (!conv || !conv.isAiActive) {
+      this.logger.log(`Fidel omitido: la conversación ${conversationId} tiene isAiActive=false`);
+      return null;
+    }
+
+    const rows = await this.prisma.message.findMany({
+      where: { conversationId },
+      orderBy: { whatsappTimestamp: 'desc' },
+      take: 10,
+    });
+
+    const ordered = [...rows].reverse();
+    const recent = ordered.map((m) =>
+      m.direction === MessageDirection.IN ? `Cliente: ${m.body}` : `Fidel: ${m.body}`,
+    );
+    const context = recent.join('\n');
+
+    const lastIn = [...ordered].reverse().find((m) => m.direction === MessageDirection.IN);
+    const customerMessage = lastIn?.body || '';
+    if (!customerMessage.trim()) return null;
+
+    let replyText = '';
+
+    try {
+      // Consumir Fidel MCP Server (Cerebro Central comercial)
+      const mcpResult = await this.fidelMcp.sendTurn({
+        conversationId,
+        message: customerMessage,
+      });
+
+      if (mcpResult.ignoredByAi || !mcpResult.replyText) {
+        this.logger.log(`Fidel MCP está en Modo Espejo (HUMAN_ACTIVE) para conv=${conversationId}`);
+        return null;
+      }
+
+      replyText = mcpResult.replyText.trim();
+
+      // Guardar en caché el resultado enriquecido del turno comercial
+      const intelPayload = {
+        conversationId,
+        sessionId: conversationId,
+        intentLevel: mcpResult.intentLevel,
+        intentJustification: mcpResult.intentJustification,
+        detectedProductKey: mcpResult.detectedProductKey,
+        activeProductKey: mcpResult.detectedProductKey,
+        extractedFields: mcpResult.extractedFields,
+        mcpExecutions: mcpResult.mcpExecutions,
+        nextAction: mcpResult.nextAction,
+        incrementalSummary: mcpResult.incrementalSummary,
+        status: mcpResult.status,
+        timestamp: Date.now(),
+      };
+      this.conversationIntelCache.set(conversationId, intelPayload);
+
+      // Emitir inteligencia comercial del turno vía WebSocket para la Ficha MCP en ChatControl-Front
+      this.chatGateway.server?.to(`org:${organizationId}`)?.emit('fidel_mcp_intel', intelPayload);
+      this.chatGateway.server?.to(`conversation:${conversationId}`)?.emit('fidel_mcp_intel', intelPayload);
+    } catch (err: any) {
+      this.logger.error(`Error consultando a Fidel MCP para conv=${conversationId}:`, err);
+      try {
+        const fallback = await this.ai.generateReply(organizationId, context);
+        replyText = fallback.text?.trim() || '';
+      } catch {
+        return null;
+      }
+    }
+
+    if (!replyText) return null;
+
+    let wamid = `fidel_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+
+    // Si WhatsApp está configurado en la organización, enviar saliente por Cloud API
+    try {
+      const sent = await this.whatsapp.sendTextMessageRaw(organizationId, contactPhone, replyText);
+      if (sent?.messageId) wamid = sent.messageId;
+    } catch (err: any) {
+      this.logger.warn(`Envío WhatsApp omitido/fallido (${err?.message || err}), guardando localmente`);
+    }
+
+    const created = await this.prisma.message.create({
+      data: {
+        conversationId,
+        direction: MessageDirection.OUT,
+        type: MessageType.TEXT,
+        status: MessageStatus.SENT,
+        body: replyText,
+        fromAi: true,
+        whatsappMessageId: wamid,
+        whatsappTimestamp: new Date(),
+      },
+    });
+
+    const msgPayload: any = {
+      id: created.id,
+      conversationId,
+      fromUser: false,
+      text: replyText,
+      timestamp: created.whatsappTimestamp.getTime(),
+      type: MessageType.TEXT,
+      fromAi: true,
+      status: MessageStatus.SENT,
+    };
+
+    this.chatGateway.emitNewMessage(organizationId, conversationId, msgPayload);
+    return created as any;
+  }
+
+  async setConversationAiActive(conversationId: string, organizationId: string, isAiActive: boolean): Promise<boolean> {
+    await this.assertConversationInOrg(conversationId, organizationId);
+    if (!isAiActive) {
+      this.cancelFidelAutoReply(conversationId);
+      void this.fidelMcp.setSessionStatus(conversationId, 'HUMAN_ACTIVE');
+    } else {
+      void this.fidelMcp.setSessionStatus(conversationId, 'AI_ACTIVE');
+      const lastMsg = await this.prisma.message.findFirst({
+        where: { conversationId },
+        orderBy: { whatsappTimestamp: 'desc' },
+        select: { id: true },
+      });
+      if (lastMsg) {
+        this.processedIncomingMsgIds.add(lastMsg.id);
+      }
+    }
+    await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: { isAiActive },
+    });
+    this.chatGateway.server?.to(`org:${organizationId}`)?.emit('conversation_ai_status_updated', {
+      conversationId,
+      isAiActive,
+    });
+    return isAiActive;
+  }
+
+  async getFidelGlobalAiStatus(organizationId: string): Promise<boolean> {
+    try {
+      const row = await this.prisma.organizationSetting.findUnique({
+        where: { organizationId_key: { organizationId, key: 'fidel_global_ai_active' } },
+      });
+      return row?.value === 'true';
+    } catch {
+      return false;
+    }
+  }
+
+  async setFidelGlobalAiStatus(
+    organizationId: string,
+    enabled: boolean,
+    applyToExisting = false,
+  ): Promise<{ enabled: boolean; updatedCount: number }> {
+    await this.prisma.organizationSetting.upsert({
+      where: { organizationId_key: { organizationId, key: 'fidel_global_ai_active' } },
+      create: { organizationId, key: 'fidel_global_ai_active', value: String(enabled) },
+      update: { value: String(enabled) },
+    });
+
+    let updatedCount = 0;
+    if (applyToExisting) {
+      const res = await this.prisma.conversation.updateMany({
+        where: { contact: { organizationId } },
+        data: { isAiActive: enabled },
+      });
+      updatedCount = res.count;
+    }
+
+    this.chatGateway.server?.to(`org:${organizationId}`)?.emit('fidel_global_ai_status_updated', {
+      organizationId,
+      enabled,
+      applyToExisting,
+      updatedCount,
+    });
+
+    return { enabled, updatedCount };
+  }
+
+  async getFidelConversationIntel(conversationId: string, organizationId: string) {
+    await this.assertConversationInOrg(conversationId, organizationId);
+    const session = await this.fidelMcp.getSessionState(conversationId);
+    const cached = this.conversationIntelCache.get(conversationId);
+
+    const activeProduct =
+      cached?.detectedProductKey ||
+      cached?.activeProductKey ||
+      session?.activeProductKey;
+
+    const extracted =
+      session?.extractedFields && session.extractedFields.length > 0
+        ? session.extractedFields
+        : (cached?.extractedFields || []);
+
+    return {
+      ok: true,
+      conversationId,
+      intel: session || cached
+        ? {
+            status: session?.status || cached?.status || 'AI_ACTIVE',
+            activeProductKey: activeProduct,
+            detectedProductKey: activeProduct,
+            intentLevel: cached?.intentLevel || (session?.messagesCount && session.messagesCount > 0 ? 'MEDIO' : undefined),
+            intentJustification: cached?.intentJustification || (activeProduct === 'custom_software' ? 'Interés en desarrollo a la medida de software con IA.' : undefined),
+            extractedFields: extracted,
+            mcpExecutions: cached?.mcpExecutions || [],
+            nextAction: cached?.nextAction,
+            incrementalSummary: session?.incrementalSummary || cached?.incrementalSummary || '',
+            messagesCount: session?.messagesCount ?? cached?.messagesCount ?? 0,
+            timestamp: cached?.timestamp || Date.now(),
+          }
+        : null,
+    };
+  }
+
+  private async getTrainingConversationIds(organizationId: string): Promise<string[]> {
+    try {
+      const row = await this.prisma.organizationSetting.findUnique({
+        where: { organizationId_key: { organizationId, key: 'fidel_training_conversations' } },
+      });
+      if (!row?.value) return [];
+      const parsed = JSON.parse(row.value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  async isConversationInTrainingMode(conversationId: string, organizationId: string): Promise<boolean> {
+    const ids = await this.getTrainingConversationIds(organizationId);
+    return ids.includes(conversationId);
+  }
+
+  async setConversationTrainingMode(
+    conversationId: string,
+    organizationId: string,
+    isTrainingMode: boolean,
+  ): Promise<{ isTrainingMode: boolean; isAiActive: boolean }> {
+    await this.assertConversationInOrg(conversationId, organizationId);
+    const currentIds = await this.getTrainingConversationIds(organizationId);
+    const nextIds = isTrainingMode
+      ? Array.from(new Set([...currentIds, conversationId]))
+      : currentIds.filter((id) => id !== conversationId);
+
+    await this.prisma.organizationSetting.upsert({
+      where: { organizationId_key: { organizationId, key: 'fidel_training_conversations' } },
+      create: {
+        organizationId,
+        key: 'fidel_training_conversations',
+        value: JSON.stringify(nextIds),
+      },
+      update: {
+        value: JSON.stringify(nextIds),
+      },
+    });
+
+    let isAiActive = false;
+    if (isTrainingMode) {
+      isAiActive = await this.setConversationAiActive(conversationId, organizationId, true);
+    } else {
+      const c = await this.prisma.conversation.findUnique({
+        where: { id: conversationId },
+        select: { isAiActive: true },
+      });
+      isAiActive = c?.isAiActive ?? false;
+    }
+
+    this.chatGateway.server?.to(`org:${organizationId}`)?.emit('conversation_training_status_updated', {
+      conversationId,
+      isTrainingMode,
+      isAiActive,
+    });
+
+    return { isTrainingMode, isAiActive };
+  }
+
+  async getFidelRules(organizationId: string) {
+    return this.ai.getFidelTrainingRules(organizationId);
+  }
+
+  async addFidelRule(
+    organizationId: string,
+    params: { instruction: string; category?: string; sourceFeedback?: string; createdByName?: string },
+  ) {
+    const rule = await this.ai.addFidelTrainingRule(organizationId, params);
+    this.chatGateway.server?.to(`org:${organizationId}`)?.emit('fidel_rule_learned', { rule });
+    return rule;
+  }
+
+  async toggleFidelRule(organizationId: string, ruleId: string, isActive: boolean) {
+    return this.ai.toggleFidelTrainingRule(organizationId, ruleId, isActive);
+  }
+
+  async deleteFidelRule(organizationId: string, ruleId: string) {
+    return this.ai.deleteFidelTrainingRule(organizationId, ruleId);
+  }
+
+  async runSandboxTrainingTurn(
+    organizationId: string,
+    history: Array<{ role: 'trainer' | 'fidel'; text: string }>,
+    message: string,
+    trainerName?: string,
+  ) {
+    const context = history
+      .slice(-10)
+      .map((m) => (m.role === 'trainer' ? `Cliente/Entrenador: ${m.text}` : `Fidel: ${m.text}`))
+      .join('\n');
+    const res = await this.ai.processFidelTrainingTurn(organizationId, context, message, trainerName);
+    if (res.learnedRule) {
+      this.chatGateway.server?.to(`org:${organizationId}`)?.emit('fidel_rule_learned', {
+        rule: res.learnedRule,
+      });
+    }
+    return res;
+  }
 }
+

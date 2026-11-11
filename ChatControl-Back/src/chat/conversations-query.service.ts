@@ -86,6 +86,7 @@ export class ConversationsQueryService {
         unreadCount,
         assignedToUserId: c.assignedToUserId,
         isNewLead: c.isNewLead,
+        isAiActive: (c as any).isAiActive ?? false,
         adReferral: (c as any).adReferral ?? undefined,
       };
     });
@@ -131,6 +132,7 @@ export class ConversationsQueryService {
       unreadCount,
       assignedToUserId: c.assignedToUserId,
       isNewLead: c.isNewLead,
+      isAiActive: (c as any).isAiActive ?? false,
       adReferral: (c as any).adReferral ?? undefined,
     };
   }
