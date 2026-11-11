@@ -1000,12 +1000,15 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
 
     const conv = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
-      select: { isAiActive: true },
+      include: { contact: { select: { organizationId: true, phone: true } } },
     });
     if (!conv || !conv.isAiActive) {
       this.logger.log(`Fidel omitido: la conversación ${conversationId} tiene isAiActive=false`);
       return null;
     }
+
+    const resolvedOrgId = conv.contact?.organizationId || organizationId;
+    const resolvedPhone = conv.contact?.phone || contactPhone;
 
     const rows = await this.prisma.message.findMany({
       where: { conversationId },
@@ -1091,12 +1094,12 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
         this.conversationIntelCache.set(conversationId, intelPayload);
 
         // Emitir inteligencia comercial del turno vía WebSocket para la Ficha MCP en ChatControl-Front
-        this.chatGateway.server?.to(`org:${organizationId}`)?.emit('fidel_mcp_intel', intelPayload);
+        this.chatGateway.server?.to(`org:${resolvedOrgId}`)?.emit('fidel_mcp_intel', intelPayload);
         this.chatGateway.server?.to(`conversation:${conversationId}`)?.emit('fidel_mcp_intel', intelPayload);
       } catch (err: any) {
         this.logger.error(`Error consultando a Fidel MCP para conv=${conversationId}:`, err);
         try {
-          const fallback = await this.ai.generateReply(organizationId, context);
+          const fallback = await this.ai.generateReply(resolvedOrgId, context);
           replyText = fallback.text?.trim() || '';
         } catch {
           return null;
@@ -1123,7 +1126,7 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
 
       // Si WhatsApp está configurado en la organización, enviar saliente por Cloud API
       try {
-        const sent = await this.whatsapp.sendTextMessageRaw(organizationId, contactPhone, replyText);
+        const sent = await this.whatsapp.sendTextMessageRaw(resolvedOrgId, resolvedPhone, replyText);
         if (sent?.messageId) wamid = sent.messageId;
       } catch (err: any) {
         this.logger.warn(`Envío WhatsApp omitido/fallido (${err?.message || err}), guardando localmente`);
@@ -1153,7 +1156,7 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
         status: MessageStatus.SENT,
       };
 
-      this.chatGateway.emitNewMessage(organizationId, conversationId, msgPayload);
+      this.chatGateway.emitNewMessage(resolvedOrgId, conversationId, msgPayload);
       return created as any;
     } finally {
       this.executingFidelConversations.delete(conversationId);
