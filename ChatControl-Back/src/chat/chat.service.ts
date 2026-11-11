@@ -319,6 +319,9 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
         } as any,
       );
 
+      // Evitar que el poller remoto procese este mismo mensaje si ya vino por Webhook
+      this.processedIncomingMsgIds.add(created.id);
+
       // Respuesta automática de Fidel si la IA está activa
       this.triggerFidelAutoReply(payload.organizationId, conversation.id, contact.phone);
     }
@@ -884,6 +887,8 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
   private readonly fidelDebounceTimers = new Map<string, NodeJS.Timeout>();
   private readonly conversationIntelCache = new Map<string, any>();
   private readonly processedIncomingMsgIds = new Set<string>();
+  private readonly executingFidelConversations = new Set<string>();
+  private readonly repliedIncomingMsgIds = new Set<string>();
   private readonly startedAt = new Date();
   private remotePollerTimer: NodeJS.Timeout | null = null;
   private isPollingRemote = false;
@@ -935,6 +940,9 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
 
         this.processedIncomingMsgIds.add(lastMsg.id);
 
+        // Si ya respondimos a este mensaje entrante, no disparar Fidel de nuevo
+        if (this.repliedIncomingMsgIds.has(lastMsg.id)) continue;
+
         this.chatGateway.emitNewMessage(conv.contact.organizationId, conv.id, {
           id: lastMsg.id,
           conversationId: conv.id,
@@ -984,6 +992,12 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
   }
 
   async executeFidelReply(organizationId: string, conversationId: string, contactPhone: string): Promise<Message | null> {
+    // 0. Bloqueo de concurrencia: si ya se está procesando un turno para esta conversación, evitar ejecuciones simultáneas
+    if (this.executingFidelConversations.has(conversationId)) {
+      this.logger.log(`Fidel omitido: ya hay una ejecución en curso para conv=${conversationId}`);
+      return null;
+    }
+
     const conv = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
       select: { isAiActive: true },
@@ -999,100 +1013,151 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
       take: 10,
     });
 
-    const ordered = [...rows].reverse();
-    const recent = ordered.map((m) =>
-      m.direction === MessageDirection.IN ? `Cliente: ${m.body}` : `Fidel: ${m.body}`,
-    );
-    const context = recent.join('\n');
+    if (!rows.length) return null;
 
-    const lastIn = [...ordered].reverse().find((m) => m.direction === MessageDirection.IN);
+    const ordered = [...rows].reverse();
+
+    // 1. Si el último mensaje absoluto ya es OUT, significa que el sistema o un asesor ya respondió
+    const lastMessage = ordered[ordered.length - 1];
+    if (lastMessage && lastMessage.direction === MessageDirection.OUT) {
+      this.logger.log(`Fidel omitido: el último mensaje ya es de salida (OUT) en conv=${conversationId}`);
+      return null;
+    }
+
+    // 2. Encontrar el último mensaje entrante (IN) del cliente
+    const lastInIndex = ordered.map((m) => m.direction).lastIndexOf(MessageDirection.IN);
+    if (lastInIndex === -1) return null;
+    const lastIn = ordered[lastInIndex];
     const customerMessage = lastIn?.body || '';
     if (!customerMessage.trim()) return null;
 
-    let replyText = '';
+    // 3. Si ya respondimos a este mensaje entrante específicamente, omitir
+    if (this.repliedIncomingMsgIds.has(lastIn.id)) {
+      this.logger.log(`Fidel omitido: el mensaje entrante ${lastIn.id} ya fue respondido previamente`);
+      return null;
+    }
+
+    // 4. Si existe algún mensaje OUT posterior a este lastIn, omitir
+    const alreadyReplied = ordered.slice(lastInIndex + 1).some((m) => m.direction === MessageDirection.OUT);
+    if (alreadyReplied) {
+      this.logger.log(`Fidel omitido: ya existe una respuesta saliente posterior a lastIn en conv=${conversationId}`);
+      return null;
+    }
+
+    // Registrar ejecución en curso y marcar el mensaje como respondido
+    this.executingFidelConversations.add(conversationId);
+    this.repliedIncomingMsgIds.add(lastIn.id);
+    if (this.repliedIncomingMsgIds.size > 2000) {
+      this.repliedIncomingMsgIds.clear();
+    }
 
     try {
-      // Consumir Fidel MCP Server (Cerebro Central comercial)
-      const mcpResult = await this.fidelMcp.sendTurn({
-        conversationId,
-        message: customerMessage,
+      const recent = ordered.map((m) =>
+        m.direction === MessageDirection.IN ? `Cliente: ${m.body}` : `Fidel: ${m.body}`,
+      );
+      const context = recent.join('\n');
+
+      let replyText = '';
+
+      try {
+        // Consumir Fidel MCP Server (Cerebro Central comercial)
+        const mcpResult = await this.fidelMcp.sendTurn({
+          conversationId,
+          message: customerMessage,
+        });
+
+        if (mcpResult.ignoredByAi || !mcpResult.replyText) {
+          this.logger.log(`Fidel MCP está en Modo Espejo (HUMAN_ACTIVE) para conv=${conversationId}`);
+          return null;
+        }
+
+        replyText = mcpResult.replyText.trim();
+
+        // Guardar en caché el resultado enriquecido del turno comercial
+        const intelPayload = {
+          conversationId,
+          sessionId: conversationId,
+          intentLevel: mcpResult.intentLevel,
+          intentJustification: mcpResult.intentJustification,
+          detectedProductKey: mcpResult.detectedProductKey,
+          activeProductKey: mcpResult.detectedProductKey,
+          extractedFields: mcpResult.extractedFields,
+          mcpExecutions: mcpResult.mcpExecutions,
+          nextAction: mcpResult.nextAction,
+          incrementalSummary: mcpResult.incrementalSummary,
+          status: mcpResult.status,
+          timestamp: Date.now(),
+        };
+        this.conversationIntelCache.set(conversationId, intelPayload);
+
+        // Emitir inteligencia comercial del turno vía WebSocket para la Ficha MCP en ChatControl-Front
+        this.chatGateway.server?.to(`org:${organizationId}`)?.emit('fidel_mcp_intel', intelPayload);
+        this.chatGateway.server?.to(`conversation:${conversationId}`)?.emit('fidel_mcp_intel', intelPayload);
+      } catch (err: any) {
+        this.logger.error(`Error consultando a Fidel MCP para conv=${conversationId}:`, err);
+        try {
+          const fallback = await this.ai.generateReply(organizationId, context);
+          replyText = fallback.text?.trim() || '';
+        } catch {
+          return null;
+        }
+      }
+
+      if (!replyText) return null;
+
+      // 5. DOBLE CHECK EN BD: Si otra instancia o proceso respondió mientras Fidel MCP pensaba, abortar envío
+      const concurrentOut = await this.prisma.message.findFirst({
+        where: {
+          conversationId,
+          direction: MessageDirection.OUT,
+          whatsappTimestamp: { gte: lastIn.whatsappTimestamp },
+        },
+        select: { id: true },
+      });
+      if (concurrentOut) {
+        this.logger.warn(`Fidel cancelado por doble check: otra respuesta ya fue enviada para conv=${conversationId}`);
+        return null;
+      }
+
+      let wamid = `fidel_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+
+      // Si WhatsApp está configurado en la organización, enviar saliente por Cloud API
+      try {
+        const sent = await this.whatsapp.sendTextMessageRaw(organizationId, contactPhone, replyText);
+        if (sent?.messageId) wamid = sent.messageId;
+      } catch (err: any) {
+        this.logger.warn(`Envío WhatsApp omitido/fallido (${err?.message || err}), guardando localmente`);
+      }
+
+      const created = await this.prisma.message.create({
+        data: {
+          conversationId,
+          direction: MessageDirection.OUT,
+          type: MessageType.TEXT,
+          status: MessageStatus.SENT,
+          body: replyText,
+          fromAi: true,
+          whatsappMessageId: wamid,
+          whatsappTimestamp: new Date(),
+        },
       });
 
-      if (mcpResult.ignoredByAi || !mcpResult.replyText) {
-        this.logger.log(`Fidel MCP está en Modo Espejo (HUMAN_ACTIVE) para conv=${conversationId}`);
-        return null;
-      }
-
-      replyText = mcpResult.replyText.trim();
-
-      // Guardar en caché el resultado enriquecido del turno comercial
-      const intelPayload = {
+      const msgPayload: any = {
+        id: created.id,
         conversationId,
-        sessionId: conversationId,
-        intentLevel: mcpResult.intentLevel,
-        intentJustification: mcpResult.intentJustification,
-        detectedProductKey: mcpResult.detectedProductKey,
-        activeProductKey: mcpResult.detectedProductKey,
-        extractedFields: mcpResult.extractedFields,
-        mcpExecutions: mcpResult.mcpExecutions,
-        nextAction: mcpResult.nextAction,
-        incrementalSummary: mcpResult.incrementalSummary,
-        status: mcpResult.status,
-        timestamp: Date.now(),
-      };
-      this.conversationIntelCache.set(conversationId, intelPayload);
-
-      // Emitir inteligencia comercial del turno vía WebSocket para la Ficha MCP en ChatControl-Front
-      this.chatGateway.server?.to(`org:${organizationId}`)?.emit('fidel_mcp_intel', intelPayload);
-      this.chatGateway.server?.to(`conversation:${conversationId}`)?.emit('fidel_mcp_intel', intelPayload);
-    } catch (err: any) {
-      this.logger.error(`Error consultando a Fidel MCP para conv=${conversationId}:`, err);
-      try {
-        const fallback = await this.ai.generateReply(organizationId, context);
-        replyText = fallback.text?.trim() || '';
-      } catch {
-        return null;
-      }
-    }
-
-    if (!replyText) return null;
-
-    let wamid = `fidel_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-
-    // Si WhatsApp está configurado en la organización, enviar saliente por Cloud API
-    try {
-      const sent = await this.whatsapp.sendTextMessageRaw(organizationId, contactPhone, replyText);
-      if (sent?.messageId) wamid = sent.messageId;
-    } catch (err: any) {
-      this.logger.warn(`Envío WhatsApp omitido/fallido (${err?.message || err}), guardando localmente`);
-    }
-
-    const created = await this.prisma.message.create({
-      data: {
-        conversationId,
-        direction: MessageDirection.OUT,
+        fromUser: false,
+        text: replyText,
+        timestamp: created.whatsappTimestamp.getTime(),
         type: MessageType.TEXT,
-        status: MessageStatus.SENT,
-        body: replyText,
         fromAi: true,
-        whatsappMessageId: wamid,
-        whatsappTimestamp: new Date(),
-      },
-    });
+        status: MessageStatus.SENT,
+      };
 
-    const msgPayload: any = {
-      id: created.id,
-      conversationId,
-      fromUser: false,
-      text: replyText,
-      timestamp: created.whatsappTimestamp.getTime(),
-      type: MessageType.TEXT,
-      fromAi: true,
-      status: MessageStatus.SENT,
-    };
-
-    this.chatGateway.emitNewMessage(organizationId, conversationId, msgPayload);
-    return created as any;
+      this.chatGateway.emitNewMessage(organizationId, conversationId, msgPayload);
+      return created as any;
+    } finally {
+      this.executingFidelConversations.delete(conversationId);
+    }
   }
 
   async setConversationAiActive(conversationId: string, organizationId: string, isAiActive: boolean): Promise<boolean> {
