@@ -26,6 +26,8 @@ import {
   simulateIncomingMessage,
   getConversationTrainingStatus,
   toggleConversationTrainingMode,
+  getFidelConversationIntel,
+  type FidelMcpIntel,
   getFidelTrainingRules,
   createFidelTrainingRule,
   toggleFidelTrainingRule,
@@ -312,10 +314,12 @@ export default function ChatPage() {
   // Fidel AI, Simulator & Training states
   const [togglingAi, setTogglingAi] = useState(false);
   const [simulatorOpen, setSimulatorOpen] = useState(false);
-  const [simulatorTab, setSimulatorTab] = useState<'simulador' | 'entrenamiento' | 'memoria'>('simulador');
+  const [simulatorTab, setSimulatorTab] = useState<'simulador' | 'mcp_intel' | 'memoria'>('simulador');
   const [simText, setSimText] = useState('');
   const [simSending, setSimSending] = useState(false);
   const [simNotice, setSimNotice] = useState('');
+  const [mcpIntel, setMcpIntel] = useState<FidelMcpIntel | null>(null);
+  const [loadingMcpIntel, setLoadingMcpIntel] = useState(false);
 
   const [isTrainingMode, setIsTrainingMode] = useState(false);
   const [togglingTraining, setTogglingTraining] = useState(false);
@@ -466,6 +470,21 @@ export default function ChatPage() {
       }
     });
 
+    socket.on('fidel_mcp_intel', (p: any) => {
+      if (p?.conversationId === selectedIdRef.current) {
+        setMcpIntel(prev => ({
+          sessionId: p.sessionId || prev?.sessionId || '',
+          tenantId: p.tenantId || prev?.tenantId || 'clearminds',
+          status: p.status || prev?.status || 'AI_ACTIVE',
+          detectedProductKey: p.detectedProductKey !== undefined ? p.detectedProductKey : prev?.detectedProductKey,
+          intentLevel: p.intentLevel || prev?.intentLevel,
+          intentJustification: p.intentJustification || prev?.intentJustification,
+          extractedFields: p.extractedFields ?? prev?.extractedFields ?? [],
+          mcpExecutions: p.mcpExecutions ?? prev?.mcpExecutions ?? [],
+        }));
+      }
+    });
+
     socket.on('typing', (p: any) => {
       if (p.userId === myUserIdRef.current || p.conversationId !== selectedIdRef.current) return;
       if (typingStopTimerRef.current) clearTimeout(typingStopTimerRef.current);
@@ -487,16 +506,19 @@ export default function ChatPage() {
     isLoadingOlderRef.current = false;
     (async () => {
       setLoadingMessages(true);
+      setLoadingMcpIntel(true);
       try {
-        const [convRes, msgRes, trainingRes] = await Promise.all([
+        const [convRes, msgRes, trainingRes, intelRes] = await Promise.all([
           getConversation(selectedId),
           getMessages(selectedId),
           getConversationTrainingStatus(selectedId).catch(() => ({ ok: true, isTrainingMode: false })),
+          getFidelConversationIntel(selectedId).catch(() => ({ ok: false, intel: null })),
         ]);
         setMessages(msgRes.messages);
         setNextCursor(msgRes.nextCursor);
         setCanSend(convRes.canSend ?? false);
         setIsTrainingMode(trainingRes?.isTrainingMode === true);
+        setMcpIntel(intelRes?.intel || null);
         if (convRes.conversation) {
           setConversations(prev =>
             prev.map(c => (c.id === selectedId ? { ...c, isAiActive: convRes.conversation!.isAiActive === true } : c))
@@ -505,6 +527,7 @@ export default function ChatPage() {
         await markConversationAsRead(selectedId);
       } catch (err) {} finally {
         setLoadingMessages(false);
+        setLoadingMcpIntel(false);
       }
     })();
   }, [selectedId]);
@@ -1140,27 +1163,27 @@ export default function ChatPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    if (simulatorOpen && (simulatorTab === 'entrenamiento' || simulatorTab === 'memoria')) {
+                    if (simulatorOpen && simulatorTab === 'mcp_intel') {
                       setSimulatorOpen(false);
                     } else {
-                      setSimulatorTab('entrenamiento');
+                      setSimulatorTab('mcp_intel');
                       setSimulatorOpen(true);
                     }
                   }}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '0.4rem',
+                    gap: '0.45rem',
                     background:
-                      isTrainingMode || (simulatorOpen && (simulatorTab === 'entrenamiento' || simulatorTab === 'memoria'))
-                        ? 'rgba(16, 185, 129, 0.16)'
+                      simulatorOpen && simulatorTab === 'mcp_intel'
+                        ? 'rgba(16, 185, 129, 0.18)'
                         : 'rgba(255, 255, 255, 0.03)',
                     border:
-                      isTrainingMode || (simulatorOpen && (simulatorTab === 'entrenamiento' || simulatorTab === 'memoria'))
+                      simulatorOpen && simulatorTab === 'mcp_intel'
                         ? '1px solid rgba(16, 185, 129, 0.5)'
                         : '1px solid rgba(255, 255, 255, 0.05)',
                     color:
-                      isTrainingMode || (simulatorOpen && (simulatorTab === 'entrenamiento' || simulatorTab === 'memoria'))
+                      simulatorOpen && simulatorTab === 'mcp_intel'
                         ? '#34D399'
                         : '#8C8C8C',
                     padding: '0.6rem 1rem',
@@ -1170,9 +1193,22 @@ export default function ChatPage() {
                     cursor: 'pointer',
                     transition: 'all 0.2s',
                   }}
-                  title="Entrenar a Fidel y gestionar sus reglas aprendidas"
+                  title="Ficha Comercial MCP de Fidel (Intención, Línea y Tools)"
                 >
-                  <span>{isTrainingMode ? 'Entrenamiento Activo' : 'Modo Entrenamiento'}</span>
+                  <SparklesIcon style={{ width: '0.9rem', height: '0.9rem' }} />
+                  <span>Ficha MCP</span>
+                  {mcpIntel?.intentLevel && (
+                    <span style={{
+                      padding: '0.15rem 0.45rem',
+                      borderRadius: '6px',
+                      fontSize: '0.62rem',
+                      fontWeight: 800,
+                      background: mcpIntel.intentLevel === 'ALTO' ? 'rgba(16, 185, 129, 0.25)' : mcpIntel.intentLevel === 'MEDIO' ? 'rgba(245, 158, 11, 0.25)' : 'rgba(100, 116, 139, 0.25)',
+                      color: mcpIntel.intentLevel === 'ALTO' ? '#34D399' : mcpIntel.intentLevel === 'MEDIO' ? '#FBBF24' : '#94A3B8',
+                    }}>
+                      {mcpIntel.intentLevel}
+                    </span>
+                  )}
                 </button>
 
                 {userRole === 'ORG_ADMIN' && (
@@ -1621,15 +1657,15 @@ export default function ChatPage() {
               <h3 style={{ fontSize: '0.92rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0, color: '#F8FAFC' }}>
                 {simulatorTab === 'simulador'
                   ? 'Simulador Cliente'
-                  : simulatorTab === 'entrenamiento'
-                  ? 'Modo Entrenamiento'
+                  : simulatorTab === 'mcp_intel'
+                  ? 'Ficha Comercial MCP'
                   : 'Memoria de Fidel'}
               </h3>
-              <span style={{ fontSize: '0.65rem', color: simulatorTab === 'simulador' ? '#A855F7' : '#34D399', fontWeight: 700 }}>
+              <span style={{ fontSize: '0.65rem', color: simulatorTab === 'simulador' ? '#A855F7' : simulatorTab === 'mcp_intel' ? '#34D399' : '#38BDF8', fontWeight: 700 }}>
                 {simulatorTab === 'simulador'
                   ? 'Ambiente de Pruebas'
-                  : simulatorTab === 'entrenamiento'
-                  ? 'Roleplay y Correcciones en Vivo'
+                  : simulatorTab === 'mcp_intel'
+                  ? 'Inteligencia en Tiempo Real & Tools'
                   : `${fidelRules.filter(r => r.isActive).length} Reglas Activas`}
               </span>
             </div>
@@ -1645,7 +1681,7 @@ export default function ChatPage() {
           <div style={{ display: 'flex', gap: '0.35rem', background: 'rgba(255,255,255,0.03)', padding: '0.3rem', borderRadius: '12px', marginBottom: '1.1rem', border: '1px solid rgba(255,255,255,0.06)' }}>
             {[
               { id: 'simulador', label: 'Simulador' },
-              { id: 'entrenamiento', label: 'Entrenar' },
+              { id: 'mcp_intel', label: 'Ficha MCP' },
               { id: 'memoria', label: `Memoria (${fidelRules.filter(r => r.isActive).length})` },
             ].map((t) => (
               <button
@@ -1664,13 +1700,17 @@ export default function ChatPage() {
                     simulatorTab === t.id
                       ? t.id === 'simulador'
                         ? 'rgba(168, 85, 247, 0.25)'
-                        : 'rgba(16, 185, 129, 0.22)'
+                        : t.id === 'mcp_intel'
+                        ? 'rgba(16, 185, 129, 0.22)'
+                        : 'rgba(56, 189, 248, 0.22)'
                       : 'transparent',
                   color:
                     simulatorTab === t.id
                       ? t.id === 'simulador'
                         ? '#E9D5FF'
-                        : '#6EE7B7'
+                        : t.id === 'mcp_intel'
+                        ? '#6EE7B7'
+                        : '#7DD3FC'
                       : '#8C8C8C',
                   transition: 'all 0.15s',
                 }}
@@ -1796,205 +1836,261 @@ export default function ChatPage() {
             </>
           )}
 
-          {/* ── TAB 2: MODO ENTRENAMIENTO (COACH / ROLEPLAY) ── */}
-          {simulatorTab === 'entrenamiento' && (
-            <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: '0.85rem' }}>
-              {/* Toggle para activar entrenamiento directamente en el chat actual */}
+          {/* ── TAB 2: FICHA COMERCIAL MCP (INTEL & TOOLS) ── */}
+          {simulatorTab === 'mcp_intel' && (
+            <div className="custom-scrollbar" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: '0.9rem', overflowY: 'auto', paddingRight: '0.2rem' }}>
+              {/* Banner Estado Servidor MCP */}
               <div style={{
-                background: isTrainingMode ? 'rgba(16, 185, 129, 0.1)' : 'rgba(255,255,255,0.03)',
-                border: isTrainingMode ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid rgba(255,255,255,0.08)',
+                background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(6, 78, 59, 0.2) 100%)',
+                border: '1px solid rgba(16, 185, 129, 0.3)',
                 borderRadius: '12px',
                 padding: '0.75rem 0.9rem',
                 display: 'flex',
-                flexDirection: 'column',
-                gap: '0.45rem',
+                justifyContent: 'space-between',
+                alignItems: 'center',
               }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '0.74rem', fontWeight: 800, color: isTrainingMode ? '#34D399' : '#E2E8F0' }}>
-                    Entrenar en el chat de {selectedConv.name || selectedConv.phone}
-                  </span>
-                  <button
-                    type="button"
-                    disabled={togglingTraining}
-                    onClick={handleToggleTrainingMode}
-                    style={{
-                      background: isTrainingMode ? '#10B981' : 'rgba(255,255,255,0.08)',
-                      color: isTrainingMode ? '#042F2E' : '#CBD5E1',
-                      border: 'none',
-                      borderRadius: '8px',
-                      padding: '0.3rem 0.65rem',
-                      fontSize: '0.68rem',
-                      fontWeight: 800,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {isTrainingMode ? 'Activo' : 'Activar'}
-                  </button>
-                </div>
-                <p style={{ margin: 0, fontSize: '0.68rem', color: '#94A3B8', lineHeight: '1.35' }}>
-                  {isTrainingMode
-                    ? 'Fidel escuchará tus correcciones de entrenador directamente en los mensajes entrantes de este chat (WhatsApp o Simulador).'
-                    : 'Actívalo si deseas entrenar a Fidel enviando mensajes desde tu WhatsApp o el Simulador en esta conversación.'}
-                </p>
-              </div>
-
-              {/* Sandbox de Entrenamiento en el Panel */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.68rem', color: '#94A3B8', fontWeight: 800, textTransform: 'uppercase' }}>
-                  Sala de Entrenamiento Rápido:
-                </span>
-                {sandboxHistory.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setSandboxHistory([])}
-                    style={{ background: 'none', border: 'none', color: '#64748B', fontSize: '0.66rem', cursor: 'pointer', fontWeight: 700 }}
-                  >
-                    Limpiar sesión
-                  </button>
-                )}
-              </div>
-
-              {/* Mensajes de la sesión de entrenamiento */}
-              <div className="custom-scrollbar" style={{
-                flex: 1,
-                minHeight: '210px',
-                maxHeight: '320px',
-                overflowY: 'auto',
-                background: '#05070B',
-                border: '1px solid rgba(255,255,255,0.06)',
-                borderRadius: '12px',
-                padding: '0.75rem',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '0.6rem',
-              }}>
-                {sandboxHistory.length === 0 ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', color: '#64748B', fontSize: '0.72rem' }}>
-                    <p style={{ margin: 0, lineHeight: '1.4', color: '#94A3B8' }}>
-                      Habla con Fidel fingiendo ser un cliente y corrígelo en cualquier momento. Ejemplo:
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => handleSendSandboxTraining('Hola Fidel, voy a fingir que soy un cliente y te iré corrigiendo o mejorando las respuestas para que lo tengas en cuenta.')}
-                      style={{
-                        background: 'rgba(16, 185, 129, 0.08)',
-                        border: '1px solid rgba(16, 185, 129, 0.25)',
-                        borderRadius: '8px',
-                        padding: '0.5rem 0.65rem',
-                        color: '#6EE7B7',
-                        fontSize: '0.7rem',
-                        textAlign: 'left',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Iniciar: &quot;Hola Fidel, voy a fingir que soy un cliente y te iré corrigiendo...&quot;
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSendSandboxTraining('Hola, quiero información de las certificaciones de AWS y precios')}
-                      style={{
-                        background: 'rgba(255, 255, 255, 0.03)',
-                        border: '1px solid rgba(255, 255, 255, 0.08)',
-                        borderRadius: '8px',
-                        padding: '0.5rem 0.65rem',
-                        color: '#CBD5E1',
-                        fontSize: '0.7rem',
-                        textAlign: 'left',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Probar como cliente: &quot;Hola, quiero información de AWS y precios&quot;
-                    </button>
+                <div>
+                  <div style={{ fontSize: '0.76rem', fontWeight: 800, color: '#34D399', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10B981', display: 'inline-block', boxShadow: '0 0 8px #10B981' }}></span>
+                    Fidel MCP Server (Render)
                   </div>
-                ) : (
-                  sandboxHistory.map((item, idx) => (
-                    <div
-                      key={idx}
-                      style={{
-                        alignSelf: item.role === 'trainer' ? 'flex-end' : 'flex-start',
-                        maxWidth: '90%',
-                        background:
-                          item.role === 'trainer'
-                            ? 'rgba(16, 185, 129, 0.18)'
-                            : item.mode === 'CORRECTION'
-                            ? 'rgba(56, 189, 248, 0.15)'
-                            : 'rgba(255,255,255,0.06)',
-                        border:
-                          item.role === 'trainer'
-                            ? '1px solid rgba(16, 185, 129, 0.35)'
-                            : item.mode === 'CORRECTION'
-                            ? '1px solid rgba(56, 189, 248, 0.4)'
-                            : '1px solid rgba(255,255,255,0.08)',
-                        borderRadius: '10px',
-                        padding: '0.55rem 0.7rem',
-                        fontSize: '0.74rem',
-                        color: '#F1F5F9',
-                        whiteSpace: 'pre-wrap',
-                        lineHeight: '1.4',
-                      }}
-                    >
-                      <div style={{ fontSize: '0.62rem', fontWeight: 800, marginBottom: '0.2rem', color: item.role === 'trainer' ? '#34D399' : '#38BDF8', textTransform: 'uppercase' }}>
-                        {item.role === 'trainer' ? 'Entrenador / Cliente' : item.mode === 'CORRECTION' ? 'Fidel (Regla Guardada)' : 'Fidel'}
-                      </div>
-                      {item.text}
-                    </div>
-                  ))
-                )}
-              </div>
-
-              {/* Input de entrenamiento */}
-              <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <textarea
-                  value={sandboxInput}
-                  onChange={e => setSandboxInput(e.target.value)}
-                  placeholder='Escribe como cliente o corrige a Fidel (ej: "Entrenador: usa menos emojis y cierra con otra pregunta")'
-                  rows={3}
-                  style={{
-                    width: '100%',
-                    background: '#040404',
-                    border: '1px solid rgba(16, 185, 129, 0.3)',
-                    borderRadius: '12px',
-                    padding: '0.7rem',
-                    color: '#FFF',
-                    fontSize: '0.78rem',
-                    resize: 'none',
-                    outline: 'none',
-                  }}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSendSandboxTraining();
-                    }
-                  }}
-                />
+                  <div style={{ fontSize: '0.66rem', color: '#94A3B8', marginTop: '0.15rem' }}>
+                    Tenant: <strong style={{ color: '#E2E8F0' }}>Clear Minds</strong> &bull; Modo: <span style={{ color: (mcpIntel?.status || 'AI_ACTIVE') === 'AI_ACTIVE' ? '#34D399' : '#F59E0B', fontWeight: 700 }}>{mcpIntel?.status || 'AI_ACTIVE'}</span>
+                  </div>
+                </div>
                 <button
                   type="button"
-                  disabled={sandboxSending || !sandboxInput.trim()}
-                  onClick={() => handleSendSandboxTraining()}
-                  style={{
-                    background: sandboxSending || !sandboxInput.trim() ? '#064E3B' : '#10B981',
-                    border: 'none',
-                    borderRadius: '10px',
-                    padding: '0.7rem',
-                    color: sandboxSending || !sandboxInput.trim() ? '#A7F3D0' : '#042F2E',
-                    fontWeight: 800,
-                    fontSize: '0.76rem',
-                    cursor: sandboxSending || !sandboxInput.trim() ? 'not-allowed' : 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '0.4rem',
+                  onClick={async () => {
+                    if (!selectedId) return;
+                    setLoadingMcpIntel(true);
+                    try {
+                      const res = await getFidelConversationIntel(selectedId);
+                      setMcpIntel(res?.intel || null);
+                    } finally {
+                      setLoadingMcpIntel(false);
+                    }
                   }}
+                  style={{
+                    background: 'rgba(255,255,255,0.06)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: '8px',
+                    padding: '0.35rem 0.6rem',
+                    color: '#CBD5E1',
+                    fontSize: '0.66rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                  title="Actualizar Ficha MCP"
                 >
-                  {sandboxSending ? (
-                    <>
-                      <Spinner size={14} />
-                      <span>Procesando con Fidel...</span>
-                    </>
-                  ) : (
-                    <span>Enviar a Fidel</span>
-                  )}
+                  {loadingMcpIntel ? 'Cargando...' : 'Refrescar'}
                 </button>
+              </div>
+
+              {/* Tarjeta 1: Intención de Compra */}
+              <div style={{
+                background: 'rgba(255, 255, 255, 0.02)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                borderRadius: '12px',
+                padding: '0.85rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.5rem',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Intención de Compra
+                  </span>
+                  {mcpIntel?.intentLevel ? (
+                    <span style={{
+                      padding: '0.2rem 0.6rem',
+                      borderRadius: '8px',
+                      fontSize: '0.7rem',
+                      fontWeight: 800,
+                      background:
+                        mcpIntel.intentLevel === 'ALTO'
+                          ? 'rgba(16, 185, 129, 0.25)'
+                          : mcpIntel.intentLevel === 'MEDIO'
+                          ? 'rgba(245, 158, 11, 0.25)'
+                          : 'rgba(100, 116, 139, 0.25)',
+                      color:
+                        mcpIntel.intentLevel === 'ALTO'
+                          ? '#34D399'
+                          : mcpIntel.intentLevel === 'MEDIO'
+                          ? '#FBBF24'
+                          : '#94A3B8',
+                      border:
+                        mcpIntel.intentLevel === 'ALTO'
+                          ? '1px solid rgba(16, 185, 129, 0.4)'
+                          : mcpIntel.intentLevel === 'MEDIO'
+                          ? '1px solid rgba(245, 158, 11, 0.4)'
+                          : '1px solid rgba(100, 116, 139, 0.4)',
+                    }}>
+                      {mcpIntel.intentLevel === 'ALTO' ? '🔥 ALTO (Lead Caliente)' : mcpIntel.intentLevel === 'MEDIO' ? '⚡ MEDIO (Evaluando)' : '❄️ BAJO (Informativo)'}
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: '0.68rem', color: '#64748B' }}>Pendiente de análisis</span>
+                  )}
+                </div>
+
+                <div style={{ fontSize: '0.74rem', color: '#E2E8F0', lineHeight: '1.4', background: 'rgba(0,0,0,0.3)', padding: '0.6rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.04)' }}>
+                  {mcpIntel?.intentJustification || 'Fidel aún no ha calificado la intención. Envía un mensaje desde el simulador o recibe un mensaje de WhatsApp para que evalúe.'}
+                </div>
+              </div>
+
+              {/* Tarjeta 2: Línea de Negocio / Producto */}
+              <div style={{
+                background: 'rgba(255, 255, 255, 0.02)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                borderRadius: '12px',
+                padding: '0.85rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.5rem',
+              }}>
+                <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Línea de Producto Detectada
+                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  {mcpIntel?.detectedProductKey ? (
+                    <div style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                      padding: '0.4rem 0.75rem',
+                      borderRadius: '8px',
+                      background: 'rgba(168, 85, 247, 0.15)',
+                      border: '1px solid rgba(168, 85, 247, 0.4)',
+                      color: '#E9D5FF',
+                      fontSize: '0.76rem',
+                      fontWeight: 700,
+                    }}>
+                      <span>📦</span>
+                      <span>
+                        {mcpIntel.detectedProductKey === 'ia_docencia'
+                          ? 'Diplomado IA Generativa para Docencia ($350)'
+                          : mcpIntel.detectedProductKey === 'aws_pack'
+                          ? 'Pack Dual Certificaciones AWS ($500)'
+                          : mcpIntel.detectedProductKey === 'krake_mentor'
+                          ? 'Krake Mentor - Carrera Fullstack & IA'
+                          : mcpIntel.detectedProductKey === 'custom_software'
+                          ? 'Software a Medida & Arquitectura Cloud'
+                          : mcpIntel.detectedProductKey}
+                      </span>
+                    </div>
+                  ) : (
+                    <span style={{ fontSize: '0.72rem', color: '#64748B', fontStyle: 'italic' }}>
+                      No se ha identificado producto específico aún en el diálogo.
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Tarjeta 3: Atributos y Datos Cualificados del Cliente */}
+              <div style={{
+                background: 'rgba(255, 255, 255, 0.02)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                borderRadius: '12px',
+                padding: '0.85rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.5rem',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Atributos Extraídos del Prospecto
+                  </span>
+                  <span style={{ fontSize: '0.65rem', color: '#64748B' }}>
+                    {mcpIntel?.extractedFields?.length || 0} datos capturados
+                  </span>
+                </div>
+
+                {mcpIntel?.extractedFields && mcpIntel.extractedFields.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                    {mcpIntel.extractedFields.map((f: any, idx: number) => {
+                      const fieldName = typeof f === 'object' && f !== null ? (f.field || f.name || f.key || JSON.stringify(f)) : String(f);
+                      const fieldValue = typeof f === 'object' && f !== null ? (f.value !== undefined ? String(f.value) : '') : '';
+                      return (
+                        <div
+                          key={idx}
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            background: 'rgba(0,0,0,0.3)',
+                            padding: '0.45rem 0.65rem',
+                            borderRadius: '8px',
+                            border: '1px solid rgba(255,255,255,0.04)',
+                            fontSize: '0.72rem',
+                          }}
+                        >
+                          <span style={{ color: '#94A3B8', fontWeight: 700 }}>{fieldName}</span>
+                          <span style={{ color: '#F1F5F9', fontWeight: 600 }}>{fieldValue || '✓ Registrado'}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p style={{ margin: 0, fontSize: '0.72rem', color: '#64748B', lineHeight: '1.4' }}>
+                    Fidel extrae automáticamente nombres, institución, número de personas y forma de pago deseada.
+                  </p>
+                )}
+              </div>
+
+              {/* Tarjeta 4: Herramientas MCP Ejecutadas */}
+              <div style={{
+                background: 'rgba(255, 255, 255, 0.02)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                borderRadius: '12px',
+                padding: '0.85rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.5rem',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Herramientas MCP Ejecutadas
+                  </span>
+                  <span style={{ fontSize: '0.65rem', color: '#64748B' }}>
+                    {mcpIntel?.mcpExecutions?.length || 0} ejecuciones
+                  </span>
+                </div>
+
+                {mcpIntel?.mcpExecutions && mcpIntel.mcpExecutions.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {mcpIntel.mcpExecutions.map((exec: any, idx: number) => (
+                      <div
+                        key={idx}
+                        style={{
+                          background: 'rgba(56, 189, 248, 0.06)',
+                          border: '1px solid rgba(56, 189, 248, 0.25)',
+                          borderRadius: '10px',
+                          padding: '0.65rem',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '0.35rem',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#38BDF8', fontFamily: 'monospace' }}>
+                            🛠️ {exec.tool || exec.toolName || 'Tool MCP'}
+                          </span>
+                          <span style={{ fontSize: '0.62rem', color: '#94A3B8' }}>
+                            {exec.timestamp ? new Date(exec.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Reciente'}
+                          </span>
+                        </div>
+                        {exec.output && (
+                          <div style={{ fontSize: '0.7rem', color: '#E2E8F0', background: 'rgba(0,0,0,0.3)', padding: '0.45rem', borderRadius: '6px', whiteSpace: 'pre-wrap', lineHeight: '1.35' }}>
+                            {typeof exec.output === 'object' ? (exec.output.message || JSON.stringify(exec.output, null, 2)) : String(exec.output)}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: '0.72rem', color: '#64748B', lineHeight: '1.4' }}>
+                    No hay tools disparadas aún. Fidel invoca herramientas MCP (cotizaciones grupales, cuotas y agendamiento) cuando detecta la necesidad comercial en el chat.
+                  </div>
+                )}
               </div>
             </div>
           )}

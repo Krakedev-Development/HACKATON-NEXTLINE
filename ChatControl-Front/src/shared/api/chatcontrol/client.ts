@@ -306,6 +306,29 @@ export async function simulateIncomingMessage(params: {
   });
 }
 
+export interface FidelMcpIntel {
+  sessionId?: string;
+  tenantId?: string;
+  status?: string;
+  activeProductKey?: string;
+  intentLevel?: 'ALTO' | 'MEDIO' | 'BAJO' | string;
+  intentJustification?: string;
+  detectedProductKey?: string;
+  extractedFields?: Array<{ key?: string; field?: string; value?: string; status?: 'captured' | 'partial' | 'missing' | string }>;
+  mcpExecutions?: Array<{ tool?: string; toolName?: string; success?: boolean; message?: string; output?: any; data?: any; timestamp?: any }>;
+  nextAction?: string;
+  incrementalSummary?: string;
+  timestamp?: number;
+}
+
+export async function getFidelConversationIntel(
+  conversationId: string,
+): Promise<{ ok: boolean; conversationId: string; intel: FidelMcpIntel | null }> {
+  return api(`/chat/conversations/${conversationId}/fidel-intel`, {
+    method: 'GET',
+  });
+}
+
 // Broadcast (Mensajes Masivos)
 export interface BroadcastContact {
   id: string;

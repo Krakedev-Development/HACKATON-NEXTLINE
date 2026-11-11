@@ -12,6 +12,7 @@ import { StorageService } from '../common/storage.service';
 import { normalizePhone } from '../common/phone.util';
 import { ensureWhatsAppCompatibleVideo, withMp4Extension, WHATSAPP_VIDEO_MAX_BYTES } from '../common/video-transcode.util';
 import { ConversationsQueryService } from './conversations-query.service';
+import { FidelMcpClientService } from '../ai/fidel-mcp-client.service';
 
 export interface Message {
   id: string;
@@ -83,6 +84,7 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
     private readonly leadAssignment: LeadAssignmentService,
     private readonly storage: StorageService,
     private readonly conversationsQuery: ConversationsQueryService,
+    private readonly fidelMcp: FidelMcpClientService,
   ) {}
 
   async registerIncomingMessage(payload: {
@@ -1000,28 +1002,46 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
     );
     const context = recent.join('\n');
 
-    const inTraining = await this.isConversationInTrainingMode(conversationId, organizationId);
+    const lastIn = [...ordered].reverse().find((m) => m.direction === MessageDirection.IN);
+    const customerMessage = lastIn?.body || '';
+    if (!customerMessage.trim()) return null;
+
     let replyText = '';
 
-    if (inTraining) {
-      const lastIn = [...ordered].reverse().find((m) => m.direction === MessageDirection.IN);
-      const latestText = lastIn?.body || '';
-      const trainingResult = await this.ai.processFidelTrainingTurn(
-        organizationId,
-        context,
-        latestText,
-        'Entrenador',
-      );
-      replyText = trainingResult.text?.trim() || '';
-      if (trainingResult.learnedRule) {
-        this.chatGateway.server?.to(`org:${organizationId}`)?.emit('fidel_rule_learned', {
-          conversationId,
-          rule: trainingResult.learnedRule,
-        });
+    try {
+      // Consumir Fidel MCP Server (Cerebro Central comercial)
+      const mcpResult = await this.fidelMcp.sendTurn({
+        conversationId,
+        message: customerMessage,
+      });
+
+      if (mcpResult.ignoredByAi || !mcpResult.replyText) {
+        this.logger.log(`Fidel MCP está en Modo Espejo (HUMAN_ACTIVE) para conv=${conversationId}`);
+        return null;
       }
-    } else {
-      const result = await this.ai.generateFidelReply(organizationId, context);
-      replyText = result.text?.trim() || '';
+
+      replyText = mcpResult.replyText.trim();
+
+      // Emitir inteligencia comercial del turno vía WebSocket para la Ficha MCP en ChatControl-Front
+      this.chatGateway.server?.to(`org:${organizationId}`)?.emit('fidel_mcp_intel', {
+        conversationId,
+        intentLevel: mcpResult.intentLevel,
+        intentJustification: mcpResult.intentJustification,
+        detectedProductKey: mcpResult.detectedProductKey,
+        extractedFields: mcpResult.extractedFields,
+        mcpExecutions: mcpResult.mcpExecutions,
+        nextAction: mcpResult.nextAction,
+        incrementalSummary: mcpResult.incrementalSummary,
+        timestamp: Date.now(),
+      });
+    } catch (err: any) {
+      this.logger.error(`Error consultando a Fidel MCP para conv=${conversationId}:`, err);
+      try {
+        const fallback = await this.ai.generateReply(organizationId, context);
+        replyText = fallback.text?.trim() || '';
+      } catch {
+        return null;
+      }
     }
 
     if (!replyText) return null;
@@ -1068,7 +1088,9 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
     await this.assertConversationInOrg(conversationId, organizationId);
     if (!isAiActive) {
       this.cancelFidelAutoReply(conversationId);
+      void this.fidelMcp.setSessionStatus(conversationId, 'HUMAN_ACTIVE');
     } else {
+      void this.fidelMcp.setSessionStatus(conversationId, 'AI_ACTIVE');
       const lastMsg = await this.prisma.message.findFirst({
         where: { conversationId },
         orderBy: { whatsappTimestamp: 'desc' },
@@ -1087,6 +1109,24 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
       isAiActive,
     });
     return isAiActive;
+  }
+
+  async getFidelConversationIntel(conversationId: string, organizationId: string) {
+    await this.assertConversationInOrg(conversationId, organizationId);
+    const session = await this.fidelMcp.getSessionState(conversationId);
+    return {
+      ok: true,
+      conversationId,
+      intel: session
+        ? {
+            status: session.status,
+            activeProductKey: session.activeProductKey,
+            extractedFields: session.extractedFields,
+            incrementalSummary: session.incrementalSummary,
+            messagesCount: session.messagesCount,
+          }
+        : null,
+    };
   }
 
   private async getTrainingConversationIds(organizationId: string): Promise<string[]> {

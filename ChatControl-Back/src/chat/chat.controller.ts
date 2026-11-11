@@ -275,6 +275,15 @@ export class ChatController {
     return { ok: true, simulatedMessageId: messageId };
   }
 
+  @Get('conversations/:id/fidel-intel')
+  async getFidelIntel(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+  ) {
+    if (!user.organizationId) throw new BadRequestException('Usuario sin organización');
+    return this.chat.getFidelConversationIntel(id, user.organizationId);
+  }
+
   @Get('conversations/:id/training-status')
   async getTrainingStatus(
     @CurrentUser() user: AuthUser,
