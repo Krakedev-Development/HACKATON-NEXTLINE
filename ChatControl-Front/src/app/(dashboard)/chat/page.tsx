@@ -383,12 +383,24 @@ export default function ChatPage() {
     const socket = io(WS_BASE, { auth: { token: token || '' } });
     socketRef.current = socket;
 
+    socket.on('connect', () => {
+      if (selectedIdRef.current) {
+        socket.emit('join_conversation', { conversationId: selectedIdRef.current });
+      }
+    });
+
     socket.on('new_message', (payload: NewMessagePayload) => {
       if (payload.conversationId === selectedIdRef.current) {
         setMessages(prev => {
           // Si ya existe por ID real, no duplicar
           if (prev.some(m => m.id === payload.message.id)) return prev;
-          // Para mensajes salientes (del agente): intentar reemplazar el temp pendiente
+
+          // Si es respuesta generada por la IA (Fidel), agregar siempre directamente con status SENT
+          if (payload.message.fromAi) {
+            return [...prev, { ...payload.message, status: payload.message.status || 'SENT' }];
+          }
+
+          // Para mensajes salientes manuales (del agente humano): intentar reemplazar el temp pendiente
           if (!payload.message.fromUser) {
             const tempIdx = prev.findIndex(m => m.id.startsWith('temp_'));
             if (tempIdx !== -1) {
@@ -396,7 +408,9 @@ export default function ChatPage() {
               updated[tempIdx] = { ...payload.message, status: payload.message.status || 'SENT' };
               return updated;
             }
+            return [...prev, { ...payload.message, status: payload.message.status || 'SENT' }];
           }
+
           // Mensaje entrante del contacto: agregar normalmente
           return [...prev, { ...payload.message, status: payload.message.status || 'RECEIVED' }];
         });
@@ -526,6 +540,7 @@ export default function ChatPage() {
     setConversations(prev =>
       prev.map(c => (c.id === selectedId ? { ...c, unreadCount: 0 } : c))
     );
+    socketRef.current?.emit('join_conversation', { conversationId: selectedId });
     isLoadingOlderRef.current = false;
     (async () => {
       setLoadingMessages(true);
