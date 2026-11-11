@@ -107,6 +107,49 @@ function PauseIcon({ style }: { style?: React.CSSProperties }) {
   );
 }
 
+function BotIcon({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg style={{ width: '0.9rem', height: '0.9rem', ...style }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2 2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/>
+      <rect x="4" y="8" width="16" height="12" rx="2"/>
+      <path d="M9 13v2"/><path d="M15 13v2"/>
+    </svg>
+  );
+}
+
+function ZapIcon({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg style={{ width: '0.85rem', height: '0.85rem', ...style }} viewBox="0 0 24 24" fill="currentColor">
+      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+    </svg>
+  );
+}
+
+function CloseIcon({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg style={{ width: '0.9rem', height: '0.9rem', ...style }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+  );
+}
+
+function PackageIcon({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg style={{ width: '0.9rem', height: '0.9rem', ...style }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m16.5 9.4-9-5.19M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+      <polyline points="3.29 7 12 12.63 20.71 7" /><line x1="12" y1="22.08" x2="12" y2="12" />
+    </svg>
+  );
+}
+
+function WrenchIcon({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg style={{ width: '0.85rem', height: '0.85rem', ...style }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+    </svg>
+  );
+}
+
 function formatAudioTime(seconds: number): string {
   if (!isFinite(seconds) || seconds < 0) return '0:00';
   const m = Math.floor(seconds / 60);
@@ -501,8 +544,8 @@ export default function ChatPage() {
       }
       setToastMessage(
         p.enabled
-          ? `⚡ Fidel Global activado${p.applyToExisting ? ` (${p.updatedCount || 0} chats actualizados)` : ' para nuevos clientes'}`
-          : `⏸️ Fidel Global pausado${p.applyToExisting ? ` (${p.updatedCount || 0} chats actualizados)` : ''}`
+          ? `Fidel Global activado${p.applyToExisting ? ` (${p.updatedCount || 0} chats actualizados)` : ' para nuevos clientes'}`
+          : `Fidel Global pausado${p.applyToExisting ? ` (${p.updatedCount || 0} chats actualizados)` : ''}`
       );
       setTimeout(() => setToastMessage(''), 4500);
     });
@@ -816,8 +859,8 @@ export default function ChatPage() {
       setGlobalAiModalOpen(false);
       setToastMessage(
         res.enabled
-          ? `⚡ Fidel Global activado${applyToExistingCheck ? ` (${res.updatedCount || 0} chats actualizados)` : ' para nuevos clientes'}`
-          : `⏸️ Fidel Global pausado${applyToExistingCheck ? ` (${res.updatedCount || 0} chats actualizados)` : ''}`
+          ? `Fidel Global activado${applyToExistingCheck ? ` (${res.updatedCount || 0} chats actualizados)` : ' para nuevos clientes'}`
+          : `Fidel Global pausado${applyToExistingCheck ? ` (${res.updatedCount || 0} chats actualizados)` : ''}`
       );
       setTimeout(() => setToastMessage(''), 4500);
     } catch (err: any) {
@@ -1106,6 +1149,9 @@ export default function ChatPage() {
                 setGlobalAiModalOpen(true);
               }}
               style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.35rem',
                 background: fidelGlobalActive ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.08)',
                 border: fidelGlobalActive ? '1px solid rgba(16, 185, 129, 0.45)' : '1px solid rgba(255, 255, 255, 0.15)',
                 borderRadius: '8px',
@@ -1118,7 +1164,12 @@ export default function ChatPage() {
               }}
               title="Configurar interruptor global de Fidel"
             >
-              {fidelGlobalActive ? 'Pausar' : 'Activar'}
+              {fidelGlobalActive ? (
+                <PauseIcon style={{ width: '0.65rem', height: '0.65rem', color: '#6EE7B7' }} />
+              ) : (
+                <ZapIcon style={{ width: '0.65rem', height: '0.65rem', color: '#F1F5F9' }} />
+              )}
+              <span>{fidelGlobalActive ? 'Pausar' : 'Activar'}</span>
             </button>
           </div>
 
@@ -1235,10 +1286,10 @@ export default function ChatPage() {
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '0.4rem',
+                    gap: '0.45rem',
                     background: selectedConv?.isAiActive === true ? 'rgba(56, 189, 248, 0.12)' : 'rgba(255, 255, 255, 0.04)',
                     border: selectedConv?.isAiActive === true ? '1px solid rgba(56, 189, 248, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
-                    color: selectedConv?.isAiActive === true ? '#38BDF8' : '#777',
+                    color: selectedConv?.isAiActive === true ? '#38BDF8' : '#94A3B8',
                     padding: '0.6rem 1rem',
                     borderRadius: '10px',
                     fontSize: '0.72rem',
@@ -1248,62 +1299,31 @@ export default function ChatPage() {
                   }}
                   title={selectedConv?.isAiActive === true ? 'Fidel responderá automáticamente. Click para pausarlo.' : 'Fidel está pausado. Click para reactivarlo.'}
                 >
+                  {selectedConv?.isAiActive === true ? (
+                    <BotIcon style={{ width: '0.85rem', height: '0.85rem', color: '#38BDF8' }} />
+                  ) : (
+                    <PauseIcon style={{ width: '0.75rem', height: '0.75rem', color: '#94A3B8' }} />
+                  )}
                   <span>{selectedConv?.isAiActive === true ? 'Fidel Activo' : 'Control Asesor'}</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => {
-                    if (simulatorOpen && simulatorTab === 'simulador') {
-                      setSimulatorOpen(false);
-                    } else {
-                      setSimulatorTab('simulador');
-                      setSimulatorOpen(true);
-                    }
-                  }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.4rem',
-                    background: simulatorOpen && simulatorTab === 'simulador' ? 'rgba(168, 85, 247, 0.2)' : 'rgba(255, 255, 255, 0.03)',
-                    border: simulatorOpen && simulatorTab === 'simulador' ? '1px solid #A855F7' : '1px solid rgba(255, 255, 255, 0.05)',
-                    color: simulatorOpen && simulatorTab === 'simulador' ? '#C084FC' : '#8C8C8C',
-                    padding: '0.6rem 1rem',
-                    borderRadius: '10px',
-                    fontSize: '0.72rem',
-                    fontWeight: 800,
-                    cursor: 'pointer',
-                    transition: 'all 0.2s',
-                  }}
-                  title="Simular mensajes de clientes en tiempo real"
-                >
-                  <span>Simulador Cliente</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (simulatorOpen && simulatorTab === 'mcp_intel') {
-                      setSimulatorOpen(false);
-                    } else {
-                      setSimulatorTab('mcp_intel');
-                      setSimulatorOpen(true);
-                    }
-                  }}
+                  onClick={() => setSimulatorOpen(prev => !prev)}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
                     gap: '0.45rem',
                     background:
-                      simulatorOpen && simulatorTab === 'mcp_intel'
+                      simulatorOpen
                         ? 'rgba(16, 185, 129, 0.18)'
                         : 'rgba(255, 255, 255, 0.03)',
                     border:
-                      simulatorOpen && simulatorTab === 'mcp_intel'
+                      simulatorOpen
                         ? '1px solid rgba(16, 185, 129, 0.5)'
                         : '1px solid rgba(255, 255, 255, 0.05)',
                     color:
-                      simulatorOpen && simulatorTab === 'mcp_intel'
+                      simulatorOpen
                         ? '#34D399'
                         : '#8C8C8C',
                     padding: '0.6rem 1rem',
@@ -1688,7 +1708,9 @@ export default function ChatPage() {
                       {replyTarget.text || (replyTarget.type && replyTarget.type !== 'TEXT' ? `📎 ${replyTarget.type}` : '')}
                     </div>
                   </div>
-                  <button onClick={() => setReplyTarget(null)} style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '8px', color: '#8C8C8C', padding: '0.4rem 0.6rem', cursor: 'pointer', fontSize: '0.85rem' }}>✕</button>
+                  <button onClick={() => setReplyTarget(null)} style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '8px', color: '#8C8C8C', padding: '0.4rem 0.6rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }} title="Cancelar respuesta">
+            <CloseIcon style={{ width: '0.75rem', height: '0.75rem' }} />
+          </button>
                 </div>
               )}
               <div style={{ background: '#0D0D0D', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '20px', padding: '0.5rem', display: 'flex', alignItems: 'flex-end', gap: '0.5rem', boxShadow: '0 -10px 40px rgba(0,0,0,0.5)' }}>
@@ -1756,14 +1778,14 @@ export default function ChatPage() {
         )}
       </main>
 
-      {/* ── Sidebar: Simulador y Modo Entrenamiento de Fidel ── */}
+      {/* ── Sidebar: Ficha Comercial MCP de Fidel ── */}
       {simulatorOpen && selectedConv && (
         <aside className="custom-scrollbar" style={{
           width: '390px',
           minWidth: '340px',
           flexShrink: 0,
           background: '#0B0F19',
-          borderLeft: simulatorTab === 'simulador' ? '1px solid rgba(168, 85, 247, 0.25)' : '1px solid rgba(16, 185, 129, 0.25)',
+          borderLeft: '1px solid rgba(16, 185, 129, 0.25)',
           display: 'flex',
           flexDirection: 'column',
           overflowY: 'auto',
@@ -1772,180 +1794,52 @@ export default function ChatPage() {
           animation: 'slideInRight 0.3s ease-out',
         }}>
           {/* Header */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-            <div>
-              <h3 style={{ fontSize: '0.92rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0, color: '#F8FAFC' }}>
-                {simulatorTab === 'simulador' ? 'Simulador Cliente' : 'Ficha Comercial MCP'}
-              </h3>
-              <span style={{ fontSize: '0.65rem', color: simulatorTab === 'simulador' ? '#A855F7' : '#34D399', fontWeight: 700 }}>
-                {simulatorTab === 'simulador' ? 'Ambiente de Pruebas' : 'Inteligencia en Tiempo Real & Tools'}
-              </span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.2rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <div style={{
+                width: '32px',
+                height: '32px',
+                borderRadius: '8px',
+                background: 'rgba(16, 185, 129, 0.15)',
+                color: '#34D399',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}>
+                <SparklesIcon style={{ width: '1rem', height: '1rem' }} />
+              </div>
+              <div>
+                <h3 style={{ fontSize: '0.92rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0, color: '#F8FAFC' }}>
+                  Ficha Comercial MCP
+                </h3>
+                <span style={{ fontSize: '0.65rem', color: '#34D399', fontWeight: 700 }}>
+                  Inteligencia en Tiempo Real & Tools
+                </span>
+              </div>
             </div>
             <button 
               onClick={() => setSimulatorOpen(false)}
-              style={{ background: 'none', border: 'none', color: '#8C8C8C', cursor: 'pointer', fontSize: '1.2rem', padding: '0.2rem' }}
+              style={{
+                background: 'rgba(255,255,255,0.04)',
+                border: 'none',
+                borderRadius: '50%',
+                width: '28px',
+                height: '28px',
+                color: '#8C8C8C',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: 0,
+                transition: 'all 0.15s ease',
+              }}
+              title="Cerrar Ficha MCP"
             >
-              ✕
+              <CloseIcon style={{ width: '0.8rem', height: '0.8rem' }} />
             </button>
           </div>
 
-          {/* Tabs */}
-          <div style={{ display: 'flex', gap: '0.35rem', background: 'rgba(255,255,255,0.03)', padding: '0.3rem', borderRadius: '12px', marginBottom: '1.1rem', border: '1px solid rgba(255,255,255,0.06)' }}>
-            {[
-              { id: 'simulador', label: 'Simulador' },
-              { id: 'mcp_intel', label: 'Ficha MCP' },
-            ].map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setSimulatorTab(t.id as any)}
-                style={{
-                  flex: 1,
-                  padding: '0.45rem 0.5rem',
-                  borderRadius: '8px',
-                  border: 'none',
-                  fontSize: '0.7rem',
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                  background:
-                    simulatorTab === t.id
-                      ? t.id === 'simulador'
-                        ? 'rgba(168, 85, 247, 0.25)'
-                        : 'rgba(16, 185, 129, 0.22)'
-                      : 'transparent',
-                  color:
-                    simulatorTab === t.id
-                      ? t.id === 'simulador'
-                        ? '#E9D5FF'
-                        : '#6EE7B7'
-                      : '#8C8C8C',
-                  transition: 'all 0.15s',
-                }}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-
-          {/* ── TAB 1: SIMULADOR CLIENTE ── */}
-          {simulatorTab === 'simulador' && (
-            <>
-              <div style={{ background: 'rgba(168, 85, 247, 0.08)', border: '1px solid rgba(168, 85, 247, 0.2)', borderRadius: '14px', padding: '0.85rem 1rem', marginBottom: '1rem' }}>
-                <p style={{ margin: 0, fontSize: '0.74rem', color: '#D8B4FE', lineHeight: '1.4' }}>
-                  Envía mensajes fingiendo ser el cliente <strong>{selectedConv.name || selectedConv.phone}</strong>. Fidel responderá en este chat aplicando su base comercial y las reglas aprendidas.
-                </p>
-                {isTrainingMode && (
-                  <div style={{ marginTop: '0.55rem', paddingTop: '0.55rem', borderTop: '1px solid rgba(168, 85, 247, 0.2)', fontSize: '0.7rem', color: '#34D399', fontWeight: 700 }}>
-                    Modo Entrenamiento activo en este chat: también puedes enviar correcciones como Entrenador desde aquí.
-                  </div>
-                )}
-              </div>
-
-              <div style={{ marginBottom: '1.1rem' }}>
-                <span style={{ fontSize: '0.68rem', color: '#888', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '0.5rem' }}>
-                  Preguntas Frecuentes Rápidas:
-                </span>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                  {[
-                    'Hola, quiero información del programa de AWS',
-                    '¿Cuánto cuesta y qué incluye el precio?',
-                    '¿Cuándo inicia el curso de IA Practitioner?',
-                    'Somos un grupo de 5 personas de mi empresa, ¿hay descuento?',
-                    '¿El examen de certificación oficial está incluido?',
-                  ].map((preset, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      disabled={simSending}
-                      onClick={() => handleSimulateClientMessage(preset)}
-                      style={{
-                        background: 'rgba(255, 255, 255, 0.03)',
-                        border: '1px solid rgba(255, 255, 255, 0.08)',
-                        borderRadius: '10px',
-                        padding: '0.55rem 0.75rem',
-                        textAlign: 'left',
-                        color: '#E2E8F0',
-                        fontSize: '0.74rem',
-                        cursor: simSending ? 'not-allowed' : 'pointer',
-                        transition: 'all 0.15s ease',
-                      }}
-                    >
-                      {preset}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                <label style={{ fontSize: '0.68rem', color: '#888', fontWeight: 800, textTransform: 'uppercase' }}>
-                  O escribe tu propio mensaje:
-                </label>
-                <textarea
-                  value={simText}
-                  onChange={e => setSimText(e.target.value)}
-                  placeholder="Ej: ¿Qué horarios tienen los sábados?"
-                  rows={3}
-                  style={{
-                    width: '100%',
-                    background: '#040404',
-                    border: '1px solid rgba(168, 85, 247, 0.3)',
-                    borderRadius: '12px',
-                    padding: '0.75rem',
-                    color: '#FFF',
-                    fontSize: '0.8rem',
-                    resize: 'none',
-                    outline: 'none',
-                  }}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSimulateClientMessage();
-                    }
-                  }}
-                />
-
-                <button
-                  type="button"
-                  disabled={simSending || !simText.trim()}
-                  onClick={() => handleSimulateClientMessage()}
-                  style={{
-                    background: simSending || !simText.trim() ? '#4C1D95' : 'linear-gradient(135deg, #9333EA 0%, #7E22CE 100%)',
-                    border: 'none',
-                    borderRadius: '12px',
-                    padding: '0.75rem',
-                    color: 'white',
-                    fontWeight: 800,
-                    fontSize: '0.78rem',
-                    cursor: simSending || !simText.trim() ? 'not-allowed' : 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '0.5rem',
-                    boxShadow: '0 4px 15px rgba(168, 85, 247, 0.25)',
-                  }}
-                >
-                  {simSending ? (
-                    <>
-                      <Spinner size={14} />
-                      <span>Enviando como cliente...</span>
-                    </>
-                  ) : (
-                    <span>Enviar como Cliente</span>
-                  )}
-                </button>
-
-                {simNotice && (
-                  <div style={{ textAlign: 'center', fontSize: '0.72rem', color: '#A78BFA', marginTop: '0.25rem', fontWeight: 600 }}>
-                    {simNotice}
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-
-          {/* ── TAB 2: FICHA COMERCIAL MCP (INTEL & TOOLS) ── */}
-          {simulatorTab === 'mcp_intel' && (
-            <div className="custom-scrollbar" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: '0.9rem', overflowY: 'auto', paddingRight: '0.2rem' }}>
+          <div className="custom-scrollbar" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: '0.9rem', overflowY: 'auto', paddingRight: '0.2rem' }}>
               {/* Banner Estado Servidor MCP */}
               <div style={{
                 background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(6, 78, 59, 0.2) 100%)',
@@ -2034,7 +1928,7 @@ export default function ChatPage() {
                           ? '1px solid rgba(245, 158, 11, 0.4)'
                           : '1px solid rgba(100, 116, 139, 0.4)',
                     }}>
-                      {mcpIntel.intentLevel === 'ALTO' ? '🔥 ALTO (Lead Caliente)' : mcpIntel.intentLevel === 'MEDIO' ? '⚡ MEDIO (Evaluando)' : '❄️ BAJO (Informativo)'}
+                      {mcpIntel.intentLevel === 'ALTO' ? 'ALTO (Lead Caliente)' : mcpIntel.intentLevel === 'MEDIO' ? 'MEDIO (Evaluando)' : 'BAJO (Informativo)'}
                     </span>
                   ) : (
                     <span style={{ fontSize: '0.68rem', color: '#64748B' }}>Pendiente de análisis</span>
@@ -2082,7 +1976,7 @@ export default function ChatPage() {
                         fontSize: '0.76rem',
                         fontWeight: 700,
                       }}>
-                        <span>📦</span>
+                        <PackageIcon style={{ width: '0.85rem', height: '0.85rem', color: '#C084FC' }} />
                         <span>
                           {prod === 'ia_docencia'
                             ? 'Diplomado IA Generativa para Docencia ($350)'
@@ -2186,8 +2080,9 @@ export default function ChatPage() {
                         }}
                       >
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#38BDF8', fontFamily: 'monospace' }}>
-                            🛠️ {exec.tool || exec.toolName || 'Tool MCP'}
+                          <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#38BDF8', fontFamily: 'monospace', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                            <WrenchIcon style={{ width: '0.75rem', height: '0.75rem', color: '#38BDF8' }} />
+                            <span>{exec.tool || exec.toolName || 'Tool MCP'}</span>
                           </span>
                           <span style={{ fontSize: '0.62rem', color: '#94A3B8' }}>
                             {exec.timestamp ? new Date(exec.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Reciente'}
@@ -2208,146 +2103,6 @@ export default function ChatPage() {
                 )}
               </div>
             </div>
-          )}
-
-          {/* ── TAB 3: MEMORIA DE REGLAS APRENDIDAS ── */}
-          {false && (
-            <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: '0.85rem' }}>
-              <div style={{ background: 'rgba(56, 189, 248, 0.08)', border: '1px solid rgba(56, 189, 248, 0.2)', borderRadius: '12px', padding: '0.7rem 0.85rem', fontSize: '0.72rem', color: '#BAE6FD', lineHeight: '1.35' }}>
-                Estas son las reglas y correcciones que Fidel ha guardado en su memoria permanente. Se aplican con prioridad máxima en todas las conversaciones.
-              </div>
-
-              {/* Formulario para agregar regla directa */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '12px', padding: '0.7rem' }}>
-                <span style={{ fontSize: '0.66rem', fontWeight: 800, color: '#94A3B8', textTransform: 'uppercase' }}>
-                  Agregar directriz manual:
-                </span>
-                <textarea
-                  value={newRuleInput}
-                  onChange={e => setNewRuleInput(e.target.value)}
-                  placeholder="Ej: No usar más de 1 emoji por mensaje y preguntar siempre si busca curso para él o para su empresa."
-                  rows={2}
-                  style={{
-                    width: '100%',
-                    background: '#040404',
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    borderRadius: '8px',
-                    padding: '0.55rem',
-                    color: '#FFF',
-                    fontSize: '0.74rem',
-                    resize: 'none',
-                    outline: 'none',
-                  }}
-                />
-                <div style={{ display: 'flex', gap: '0.4rem' }}>
-                  <select
-                    value={newRuleCategory}
-                    onChange={e => setNewRuleCategory(e.target.value)}
-                    style={{
-                      background: '#040404',
-                      border: '1px solid rgba(255,255,255,0.12)',
-                      borderRadius: '8px',
-                      color: '#CBD5E1',
-                      fontSize: '0.7rem',
-                      padding: '0.4rem 0.5rem',
-                      outline: 'none',
-                    }}
-                  >
-                    <option value="ESTILO">ESTILO</option>
-                    <option value="COMERCIAL">COMERCIAL</option>
-                    <option value="OBJECIONES">OBJECIONES</option>
-                    <option value="GENERAL">GENERAL</option>
-                  </select>
-                  <button
-                    type="button"
-                    disabled={addingRule || !newRuleInput.trim()}
-                    onClick={handleAddManualRule}
-                    style={{
-                      flex: 1,
-                      background: addingRule || !newRuleInput.trim() ? 'rgba(255,255,255,0.06)' : '#10B981',
-                      color: addingRule || !newRuleInput.trim() ? '#64748B' : '#042F2E',
-                      border: 'none',
-                      borderRadius: '8px',
-                      padding: '0.45rem',
-                      fontSize: '0.72rem',
-                      fontWeight: 800,
-                      cursor: addingRule || !newRuleInput.trim() ? 'not-allowed' : 'pointer',
-                    }}
-                  >
-                    {addingRule ? 'Guardando...' : 'Guardar Regla'}
-                  </button>
-                </div>
-              </div>
-
-              {/* Lista de reglas */}
-              <div className="custom-scrollbar" style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                {fidelRules.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: '2rem 1rem', color: '#64748B', fontSize: '0.74rem' }}>
-                    Aún no hay reglas entrenadas en memoria. Usa la pestaña Entrenar o agrega una directriz arriba.
-                  </div>
-                ) : (
-                  fidelRules.map(rule => (
-                    <div
-                      key={rule.id}
-                      style={{
-                        background: rule.isActive ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.015)',
-                        border: rule.isActive ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(255,255,255,0.05)',
-                        borderRadius: '10px',
-                        padding: '0.65rem 0.75rem',
-                        opacity: rule.isActive ? 1 : 0.55,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '0.35rem',
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontSize: '0.62rem', fontWeight: 800, color: '#34D399', background: 'rgba(16, 185, 129, 0.12)', padding: '0.15rem 0.45rem', borderRadius: '4px' }}>
-                          {rule.category}
-                        </span>
-                        <div style={{ display: 'flex', gap: '0.4rem' }}>
-                          <button
-                            type="button"
-                            onClick={() => handleToggleRule(rule.id, !rule.isActive)}
-                            style={{
-                              background: 'none',
-                              border: '1px solid rgba(255,255,255,0.12)',
-                              borderRadius: '6px',
-                              color: rule.isActive ? '#E2E8F0' : '#94A3B8',
-                              fontSize: '0.62rem',
-                              padding: '0.15rem 0.45rem',
-                              cursor: 'pointer',
-                              fontWeight: 700,
-                            }}
-                          >
-                            {rule.isActive ? 'Activa' : 'Pausada'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteRule(rule.id)}
-                            style={{
-                              background: 'rgba(239, 68, 68, 0.12)',
-                              border: '1px solid rgba(239, 68, 68, 0.3)',
-                              borderRadius: '6px',
-                              color: '#F87171',
-                              fontSize: '0.62rem',
-                              padding: '0.15rem 0.45rem',
-                              cursor: 'pointer',
-                              fontWeight: 700,
-                            }}
-                          >
-                            Eliminar
-                          </button>
-                        </div>
-                      </div>
-                      <div style={{ fontSize: '0.74rem', color: '#F1F5F9', lineHeight: '1.35' }}>
-                        {rule.instruction}
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          )}
         </aside>
       )}
 
@@ -2375,9 +2130,10 @@ export default function ChatPage() {
             </h3>
             <button 
               onClick={() => setDetailsOpen(false)}
-              style={{ background: 'none', border: 'none', color: '#8C8C8C', cursor: 'pointer', fontSize: '1.2rem', padding: '0.2rem' }}
+              style={{ background: 'none', border: 'none', color: '#8C8C8C', cursor: 'pointer', padding: '0.2rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              title="Cerrar detalles"
             >
-              ✕
+              <CloseIcon style={{ width: '0.9rem', height: '0.9rem' }} />
             </button>
           </div>
 
@@ -2734,15 +2490,16 @@ export default function ChatPage() {
               </div>
               <button
                 onClick={() => setGlobalAiModalOpen(false)}
-                style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '50%', width: '32px', height: '32px', color: '#8C8C8C', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.1rem' }}
+                style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '50%', width: '32px', height: '32px', color: '#8C8C8C', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                title="Cerrar"
               >
-                ✕
+                <CloseIcon style={{ width: '0.85rem', height: '0.85rem' }} />
               </button>
             </div>
 
             <div style={{ padding: '1.2rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <p style={{ margin: 0, fontSize: '0.78rem', color: '#94A3B8', lineHeight: '1.45' }}>
-                Controla si Fidel responderá de forma automática a los clientes. Al activarlo globalmente, cada nueva conversación entrante de WhatsApp o del simulador iniciará con Fidel activo.
+                Controla si Fidel responderá de forma automática a los clientes. Al activarlo globalmente, cada nueva conversación entrante de WhatsApp iniciará con Fidel activo.
               </p>
 
               {/* Selector de Estado */}
@@ -2760,10 +2517,15 @@ export default function ChatPage() {
                     cursor: 'pointer',
                     background: targetGlobalState ? 'rgba(16, 185, 129, 0.25)' : 'transparent',
                     color: targetGlobalState ? '#34D399' : '#94A3B8',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.4rem',
                     transition: 'all 0.15s ease',
                   }}
                 >
-                  ⚡ Fidel Activo (Automático)
+                  <ZapIcon style={{ width: '0.8rem', height: '0.8rem', color: targetGlobalState ? '#34D399' : '#94A3B8' }} />
+                  <span>Fidel Activo (Automático)</span>
                 </button>
                 <button
                   type="button"
@@ -2778,10 +2540,15 @@ export default function ChatPage() {
                     cursor: 'pointer',
                     background: !targetGlobalState ? 'rgba(239, 68, 68, 0.2)' : 'transparent',
                     color: !targetGlobalState ? '#F87171' : '#94A3B8',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.4rem',
                     transition: 'all 0.15s ease',
                   }}
                 >
-                  ⏸️ Fidel Pausado (Manual)
+                  <PauseIcon style={{ width: '0.8rem', height: '0.8rem', color: !targetGlobalState ? '#F87171' : '#94A3B8' }} />
+                  <span>Fidel Pausado (Manual)</span>
                 </button>
               </div>
 
@@ -2860,7 +2627,7 @@ export default function ChatPage() {
           <div onClick={e => e.stopPropagation()} style={{ background: '#080808', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '28px', width: '100%', maxWidth: '500px', maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)' }}>
             <div style={{ padding: '1.5rem 1.5rem 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
               <h2 style={{ fontSize: '1.1rem', fontWeight: 900, color: '#F2F2F2', margin: 0, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Seleccionar agente</h2>
-              <button onClick={() => { setAssignModalOpen(false); setAssignSearch(''); }} style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '50%', width: '32px', height: '32px', color: '#8C8C8C', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.1rem' }}>✕</button>
+              <button onClick={() => { setAssignModalOpen(false); setAssignSearch(''); }} style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '50%', width: '32px', height: '32px', color: '#8C8C8C', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }} title="Cerrar"><CloseIcon style={{ width: '0.85rem', height: '0.85rem' }} /></button>
             </div>
             <div style={{ padding: '1rem 1.5rem', flexShrink: 0 }}>
               <div style={{ position: 'relative' }}>
