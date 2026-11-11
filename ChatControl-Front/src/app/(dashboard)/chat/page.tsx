@@ -27,6 +27,8 @@ import {
   getConversationTrainingStatus,
   toggleConversationTrainingMode,
   getFidelConversationIntel,
+  getFidelGlobalAiStatus,
+  setFidelGlobalAiStatus,
   type FidelMcpIntel,
   getFidelTrainingRules,
   createFidelTrainingRule,
@@ -321,6 +323,13 @@ export default function ChatPage() {
   const [mcpIntel, setMcpIntel] = useState<FidelMcpIntel | null>(null);
   const [loadingMcpIntel, setLoadingMcpIntel] = useState(false);
 
+  // Fidel Global Master Switch
+  const [fidelGlobalActive, setFidelGlobalActive] = useState<boolean>(false);
+  const [globalAiModalOpen, setGlobalAiModalOpen] = useState(false);
+  const [togglingGlobalAi, setTogglingGlobalAi] = useState(false);
+  const [applyToExistingCheck, setApplyToExistingCheck] = useState(false);
+  const [targetGlobalState, setTargetGlobalState] = useState(false);
+
   const [isTrainingMode, setIsTrainingMode] = useState(false);
   const [togglingTraining, setTogglingTraining] = useState(false);
   const [fidelRules, setFidelRules] = useState<FidelTrainingRule[]>([]);
@@ -364,6 +373,7 @@ export default function ChatPage() {
     }).catch(() => {});
     getTags().then(setTags).catch(() => {});
     getFidelTrainingRules().then(res => setFidelRules(res.rules || [])).catch(() => {});
+    getFidelGlobalAiStatus().then(res => setFidelGlobalActive(res.enabled === true)).catch(() => {});
     loadConversations();
   }, [mounted, router]);
 
@@ -468,6 +478,19 @@ export default function ChatPage() {
         setToastMessage(`Fidel aprendió una nueva regla: ${p.rule.instruction}`);
         setTimeout(() => setToastMessage(''), 5500);
       }
+    });
+
+    socket.on('fidel_global_ai_status_updated', (p: { enabled: boolean; applyToExisting?: boolean; updatedCount?: number }) => {
+      setFidelGlobalActive(p.enabled === true);
+      if (p.applyToExisting) {
+        setConversations(prev => prev.map(c => ({ ...c, isAiActive: p.enabled })));
+      }
+      setToastMessage(
+        p.enabled
+          ? `⚡ Fidel Global activado${p.applyToExisting ? ` (${p.updatedCount || 0} chats actualizados)` : ' para nuevos clientes'}`
+          : `⏸️ Fidel Global pausado${p.applyToExisting ? ` (${p.updatedCount || 0} chats actualizados)` : ''}`
+      );
+      setTimeout(() => setToastMessage(''), 4500);
     });
 
     socket.on('fidel_mcp_intel', (p: any) => {
@@ -767,6 +790,30 @@ export default function ChatPage() {
     }
   }
 
+  async function handleSaveGlobalAi() {
+    setTogglingGlobalAi(true);
+    try {
+      const res = await setFidelGlobalAiStatus(targetGlobalState, applyToExistingCheck);
+      setFidelGlobalActive(res.enabled);
+      if (applyToExistingCheck) {
+        setConversations(prev => prev.map(c => ({ ...c, isAiActive: res.enabled })));
+      }
+      setGlobalAiModalOpen(false);
+      setToastMessage(
+        res.enabled
+          ? `⚡ Fidel Global activado${applyToExistingCheck ? ` (${res.updatedCount || 0} chats actualizados)` : ' para nuevos clientes'}`
+          : `⏸️ Fidel Global pausado${applyToExistingCheck ? ` (${res.updatedCount || 0} chats actualizados)` : ''}`
+      );
+      setTimeout(() => setToastMessage(''), 4500);
+    } catch (err: any) {
+      console.error('Error configurando Fidel Global:', err);
+      setToastMessage('Error al actualizar Fidel Global');
+      setTimeout(() => setToastMessage(''), 4000);
+    } finally {
+      setTogglingGlobalAi(false);
+    }
+  }
+
   async function handleSimulateClientMessage(presetText?: string) {
     const text = (presetText || simText).trim();
     if (!text || simSending) return;
@@ -1002,6 +1049,64 @@ export default function ChatPage() {
               </button>
             )}
           </div>
+
+          {/* Master Switch: Fidel Global */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            background: fidelGlobalActive ? 'rgba(16, 185, 129, 0.12)' : 'rgba(255, 255, 255, 0.03)',
+            border: fidelGlobalActive ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid rgba(255, 255, 255, 0.06)',
+            borderRadius: '12px',
+            padding: '0.6rem 0.85rem',
+            marginBottom: '1rem',
+            transition: 'all 0.2s ease',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span style={{
+                width: '9px',
+                height: '9px',
+                borderRadius: '50%',
+                background: fidelGlobalActive ? '#10B981' : '#64748B',
+                boxShadow: fidelGlobalActive ? '0 0 10px #10B981' : 'none',
+                display: 'inline-block',
+                flexShrink: 0,
+              }} />
+              <div>
+                <div style={{ fontSize: '0.74rem', fontWeight: 800, color: fidelGlobalActive ? '#34D399' : '#CBD5E1', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <span>Fidel Global:</span>
+                  <span style={{ color: fidelGlobalActive ? '#10B981' : '#94A3B8' }}>{fidelGlobalActive ? 'ACTIVO' : 'PAUSADO'}</span>
+                </div>
+                <div style={{ fontSize: '0.62rem', color: '#94A3B8', marginTop: '0.1rem' }}>
+                  {fidelGlobalActive ? 'Responde a nuevos leads en automático' : 'Nuevos chats para asesor humano'}
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setTargetGlobalState(!fidelGlobalActive);
+                setApplyToExistingCheck(false);
+                setGlobalAiModalOpen(true);
+              }}
+              style={{
+                background: fidelGlobalActive ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.08)',
+                border: fidelGlobalActive ? '1px solid rgba(16, 185, 129, 0.45)' : '1px solid rgba(255, 255, 255, 0.15)',
+                borderRadius: '8px',
+                padding: '0.35rem 0.65rem',
+                color: fidelGlobalActive ? '#6EE7B7' : '#F1F5F9',
+                fontSize: '0.66rem',
+                fontWeight: 800,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+              title="Configurar interruptor global de Fidel"
+            >
+              {fidelGlobalActive ? 'Pausar' : 'Activar'}
+            </button>
+          </div>
+
           <div style={{ position: 'relative' }}>
             <SearchIcon style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: '#444' }} />
             <input 
@@ -2588,6 +2693,150 @@ export default function ChatPage() {
           to { opacity: 1; }
         }
       `}</style>
+
+      {/* Modal de Fidel Global Master Switch */}
+      {globalAiModalOpen && (
+        <div
+          style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '2rem' }}
+          onClick={() => setGlobalAiModalOpen(false)}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ background: '#0A0E17', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '24px', width: '100%', maxWidth: '480px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.7)' }}
+          >
+            <div style={{ padding: '1.5rem 1.5rem 0.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <span style={{
+                  width: '12px',
+                  height: '12px',
+                  borderRadius: '50%',
+                  background: targetGlobalState ? '#10B981' : '#64748B',
+                  boxShadow: targetGlobalState ? '0 0 12px #10B981' : 'none',
+                }} />
+                <h3 style={{ fontSize: '1.05rem', fontWeight: 900, color: '#F1F5F9', margin: 0, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                  Interruptor Maestro de Fidel
+                </h3>
+              </div>
+              <button
+                onClick={() => setGlobalAiModalOpen(false)}
+                style={{ background: 'rgba(255,255,255,0.05)', border: 'none', borderRadius: '50%', width: '32px', height: '32px', color: '#8C8C8C', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.1rem' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ padding: '1.2rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <p style={{ margin: 0, fontSize: '0.78rem', color: '#94A3B8', lineHeight: '1.45' }}>
+                Controla si Fidel responderá de forma automática a los clientes. Al activarlo globalmente, cada nueva conversación entrante de WhatsApp o del simulador iniciará con Fidel activo.
+              </p>
+
+              {/* Selector de Estado */}
+              <div style={{ display: 'flex', gap: '0.5rem', background: 'rgba(255,255,255,0.03)', padding: '0.35rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                <button
+                  type="button"
+                  onClick={() => setTargetGlobalState(true)}
+                  style={{
+                    flex: 1,
+                    padding: '0.6rem',
+                    borderRadius: '9px',
+                    border: 'none',
+                    fontSize: '0.76rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    background: targetGlobalState ? 'rgba(16, 185, 129, 0.25)' : 'transparent',
+                    color: targetGlobalState ? '#34D399' : '#94A3B8',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  ⚡ Fidel Activo (Automático)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTargetGlobalState(false)}
+                  style={{
+                    flex: 1,
+                    padding: '0.6rem',
+                    borderRadius: '9px',
+                    border: 'none',
+                    fontSize: '0.76rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    background: !targetGlobalState ? 'rgba(239, 68, 68, 0.2)' : 'transparent',
+                    color: !targetGlobalState ? '#F87171' : '#94A3B8',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  ⏸️ Fidel Pausado (Manual)
+                </button>
+              </div>
+
+              {/* Casilla para aplicar masivamente a conversaciones existentes */}
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '12px', padding: '0.75rem 0.9rem', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={applyToExistingCheck}
+                  onChange={e => setApplyToExistingCheck(e.target.checked)}
+                  style={{ marginTop: '0.15rem', accentColor: '#10B981', cursor: 'pointer', width: '15px', height: '15px' }}
+                />
+                <div style={{ fontSize: '0.74rem', color: '#E2E8F0', lineHeight: '1.4' }}>
+                  <strong>Aplicar también a todas las conversaciones existentes</strong>
+                  <div style={{ fontSize: '0.66rem', color: '#94A3B8', marginTop: '0.15rem' }}>
+                    {targetGlobalState
+                      ? `Encenderá a Fidel en todas las conversaciones actuales (${conversations.length} chats).`
+                      : `Pausará a Fidel en todas las conversaciones actuales para que los asesores humanos las tomen.`}
+                  </div>
+                </div>
+              </label>
+
+              {/* Botones de acción */}
+              <div style={{ display: 'flex', gap: '0.6rem', marginTop: '0.5rem' }}>
+                <button
+                  type="button"
+                  onClick={() => setGlobalAiModalOpen(false)}
+                  style={{
+                    flex: 1,
+                    padding: '0.7rem',
+                    background: 'rgba(255,255,255,0.05)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    borderRadius: '10px',
+                    color: '#CBD5E1',
+                    fontSize: '0.76rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={togglingGlobalAi}
+                  onClick={handleSaveGlobalAi}
+                  style={{
+                    flex: 1.5,
+                    padding: '0.7rem',
+                    background: targetGlobalState
+                      ? 'linear-gradient(135deg, #10B981 0%, #059669 100%)'
+                      : 'linear-gradient(135deg, #EF4444 0%, #DC2626 100%)',
+                    border: 'none',
+                    borderRadius: '10px',
+                    color: 'white',
+                    fontSize: '0.76rem',
+                    fontWeight: 800,
+                    cursor: togglingGlobalAi ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.4rem',
+                    boxShadow: targetGlobalState ? '0 4px 15px rgba(16, 185, 129, 0.3)' : '0 4px 15px rgba(239, 68, 68, 0.3)',
+                  }}
+                >
+                  {togglingGlobalAi ? 'Guardando...' : targetGlobalState ? 'Activar Fidel Global' : 'Pausar Fidel Global'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal de asignación */}
       {assignModalOpen && (

@@ -329,6 +329,20 @@ export async function getFidelConversationIntel(
   });
 }
 
+export async function getFidelGlobalAiStatus(): Promise<{ ok: boolean; enabled: boolean }> {
+  return api('/chat/fidel-global');
+}
+
+export async function setFidelGlobalAiStatus(
+  enabled: boolean,
+  applyToExisting?: boolean,
+): Promise<{ ok: boolean; enabled: boolean; updatedCount?: number }> {
+  return api('/chat/fidel-global', {
+    method: 'POST',
+    body: JSON.stringify({ enabled, applyToExisting }),
+  });
+}
+
 // Broadcast (Mensajes Masivos)
 export interface BroadcastContact {
   id: string;

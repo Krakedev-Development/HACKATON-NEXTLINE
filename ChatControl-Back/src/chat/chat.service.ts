@@ -149,12 +149,14 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
     const isNewConversation = !conversation;
 
     if (!conversation) {
+      const isGlobalAiActive = await this.getFidelGlobalAiStatus(payload.organizationId);
       conversation = await this.prisma.conversation.create({
         data: {
           contactId: contact.id,
           lastUserMessageAt: new Date(payload.timestamp),
           campaignId: activeCampaignId,
           adReferral: payload.referral ? (payload.referral as any) : undefined,
+          isAiActive: isGlobalAiActive,
         },
       });
     } else {
@@ -1118,6 +1120,47 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
       isAiActive,
     });
     return isAiActive;
+  }
+
+  async getFidelGlobalAiStatus(organizationId: string): Promise<boolean> {
+    try {
+      const row = await this.prisma.organizationSetting.findUnique({
+        where: { organizationId_key: { organizationId, key: 'fidel_global_ai_active' } },
+      });
+      return row?.value === 'true';
+    } catch {
+      return false;
+    }
+  }
+
+  async setFidelGlobalAiStatus(
+    organizationId: string,
+    enabled: boolean,
+    applyToExisting = false,
+  ): Promise<{ enabled: boolean; updatedCount: number }> {
+    await this.prisma.organizationSetting.upsert({
+      where: { organizationId_key: { organizationId, key: 'fidel_global_ai_active' } },
+      create: { organizationId, key: 'fidel_global_ai_active', value: String(enabled) },
+      update: { value: String(enabled) },
+    });
+
+    let updatedCount = 0;
+    if (applyToExisting) {
+      const res = await this.prisma.conversation.updateMany({
+        where: { contact: { organizationId } },
+        data: { isAiActive: enabled },
+      });
+      updatedCount = res.count;
+    }
+
+    this.chatGateway.server?.to(`org:${organizationId}`)?.emit('fidel_global_ai_status_updated', {
+      organizationId,
+      enabled,
+      applyToExisting,
+      updatedCount,
+    });
+
+    return { enabled, updatedCount };
   }
 
   async getFidelConversationIntel(conversationId: string, organizationId: string) {

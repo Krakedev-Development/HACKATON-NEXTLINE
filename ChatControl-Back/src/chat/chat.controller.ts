@@ -46,6 +46,15 @@ class ToggleAiDto {
   isAiActive!: boolean;
 }
 
+class ToggleGlobalAiDto {
+  @IsBoolean()
+  enabled!: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  applyToExisting?: boolean;
+}
+
 class ToggleTrainingDto {
   @IsBoolean()
   isTrainingMode!: boolean;
@@ -282,6 +291,27 @@ export class ChatController {
   ) {
     if (!user.organizationId) throw new BadRequestException('Usuario sin organización');
     return this.chat.getFidelConversationIntel(id, user.organizationId);
+  }
+
+  @Get('fidel-global')
+  async getFidelGlobalStatus(@CurrentUser() user: AuthUser) {
+    if (!user.organizationId) throw new BadRequestException('Usuario sin organización');
+    const enabled = await this.chat.getFidelGlobalAiStatus(user.organizationId);
+    return { ok: true, enabled };
+  }
+
+  @Post('fidel-global')
+  async setFidelGlobalStatus(
+    @CurrentUser() user: AuthUser,
+    @Body() body: ToggleGlobalAiDto,
+  ) {
+    if (!user.organizationId) throw new BadRequestException('Usuario sin organización');
+    const result = await this.chat.setFidelGlobalAiStatus(
+      user.organizationId,
+      body.enabled,
+      body.applyToExisting ?? false,
+    );
+    return { ok: true, ...result };
   }
 
   @Get('conversations/:id/training-status')
