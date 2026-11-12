@@ -382,6 +382,8 @@ export default function ChatPage() {
   const [newRuleInput, setNewRuleInput] = useState('');
   const [newRuleCategory, setNewRuleCategory] = useState<string>('ESTILO');
   const [addingRule, setAddingRule] = useState(false);
+  const [trainingPanelOpen, setTrainingPanelOpen] = useState(false);
+  const [trainingTab, setTrainingTab] = useState<'rules' | 'sandbox'>('rules');
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   
@@ -1173,6 +1175,41 @@ export default function ChatPage() {
             </button>
           </div>
 
+          <button
+            type="button"
+            onClick={() => setTrainingPanelOpen(true)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              width: '100%',
+              background: 'rgba(245, 158, 11, 0.08)',
+              border: '1px solid rgba(245, 158, 11, 0.28)',
+              borderRadius: '10px',
+              padding: '0.55rem 0.75rem',
+              marginBottom: '0.75rem',
+              color: '#FBBF24',
+              fontSize: '0.7rem',
+              fontWeight: 800,
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+            }}
+            title="Abrir Auditoría de Reglas Aprendidas y Simulador de Entrenamiento"
+          >
+            <span style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+              <SparklesIcon style={{ width: '0.85rem', height: '0.85rem', color: '#F59E0B' }} />
+              <span>Entrenamiento & Reglas de Fidel</span>
+            </span>
+            <span style={{
+              background: 'rgba(245, 158, 11, 0.2)',
+              padding: '0.15rem 0.45rem',
+              borderRadius: '6px',
+              fontSize: '0.62rem',
+            }}>
+              {fidelRules.filter(r => r.isActive).length} activas
+            </span>
+          </button>
+
           <div style={{ position: 'relative' }}>
             <SearchIcon style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: '#444' }} />
             <input 
@@ -1305,6 +1342,30 @@ export default function ChatPage() {
                     <PauseIcon style={{ width: '0.75rem', height: '0.75rem', color: '#94A3B8' }} />
                   )}
                   <span>{selectedConv?.isAiActive === true ? 'Fidel Activo' : 'Control Asesor'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleToggleTrainingMode}
+                  disabled={togglingTraining}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.45rem',
+                    background: isTrainingMode ? 'rgba(245, 158, 11, 0.2)' : 'rgba(255, 255, 255, 0.03)',
+                    border: isTrainingMode ? '1px solid rgba(245, 158, 11, 0.55)' : '1px solid rgba(255, 255, 255, 0.08)',
+                    color: isTrainingMode ? '#FBBF24' : '#8C8C8C',
+                    padding: '0.6rem 0.95rem',
+                    borderRadius: '10px',
+                    fontSize: '0.72rem',
+                    fontWeight: 800,
+                    cursor: togglingTraining ? 'wait' : 'pointer',
+                    transition: 'all 0.2s',
+                  }}
+                  title={isTrainingMode ? 'Modo Entrenamiento ACTIVO en este chat (Roleplay y Aprendizaje). Click para volver a modo normal.' : 'Activar Modo Entrenamiento (Roleplay) para este contacto'}
+                >
+                  <ZapIcon style={{ width: '0.85rem', height: '0.85rem', color: isTrainingMode ? '#F59E0B' : '#8C8C8C' }} />
+                  <span>{isTrainingMode ? 'Entrenando' : 'Entrenar Chat'}</span>
                 </button>
 
                 <button
@@ -2685,6 +2746,252 @@ export default function ChatPage() {
                 <div style={{ padding: '3rem', textAlign: 'center', color: '#444', fontSize: '0.85rem' }}>No se encontraron agentes.</div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {trainingPanelOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 90,
+            background: 'rgba(0,0,0,0.75)',
+            backdropFilter: 'blur(6px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1.5rem',
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: '760px',
+              maxHeight: '85vh',
+              background: '#0F1117',
+              border: '1px solid rgba(245, 158, 11, 0.35)',
+              borderRadius: '20px',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              boxShadow: '0 25px 60px rgba(0,0,0,0.6)',
+            }}
+          >
+            <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: '#FBBF24' }}>
+                  Entrenamiento & Auditoría de Reglas (Fidel MCP)
+                </h3>
+                <p style={{ margin: '0.2rem 0 0', fontSize: '0.75rem', color: '#94A3B8' }}>
+                  Audita las reglas aprendidas en roleplay o practica con Fidel en vivo para corregir sus respuestas.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTrainingPanelOpen(false)}
+                style={{ background: 'rgba(255,255,255,0.05)', border: 'none', color: '#94A3B8', borderRadius: '8px', padding: '0.45rem 0.75rem', cursor: 'pointer', fontWeight: 700 }}
+              >
+                Cerrar ✕
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.5rem', padding: '0.75rem 1.5rem', borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)' }}>
+              <button
+                type="button"
+                onClick={() => setTrainingTab('rules')}
+                style={{
+                  padding: '0.45rem 1rem',
+                  borderRadius: '8px',
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  border: trainingTab === 'rules' ? '1px solid rgba(245,158,11,0.5)' : '1px solid transparent',
+                  background: trainingTab === 'rules' ? 'rgba(245,158,11,0.18)' : 'transparent',
+                  color: trainingTab === 'rules' ? '#FBBF24' : '#94A3B8',
+                }}
+              >
+                Reglas Aprendidas ({fidelRules.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setTrainingTab('sandbox')}
+                style={{
+                  padding: '0.45rem 1rem',
+                  borderRadius: '8px',
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  border: trainingTab === 'sandbox' ? '1px solid rgba(245,158,11,0.5)' : '1px solid transparent',
+                  background: trainingTab === 'sandbox' ? 'rgba(245,158,11,0.18)' : 'transparent',
+                  color: trainingTab === 'sandbox' ? '#FBBF24' : '#94A3B8',
+                }}
+              >
+                Simulador Roleplay (Sandbox)
+              </button>
+            </div>
+
+            {trainingTab === 'rules' ? (
+              <div style={{ flex: 1, overflowY: 'auto', padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <select
+                    value={newRuleCategory}
+                    onChange={e => setNewRuleCategory(e.target.value)}
+                    style={{ background: '#1A1D27', color: '#E2E8F0', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '8px', padding: '0.55rem 0.75rem', fontSize: '0.78rem' }}
+                  >
+                    <option value="ESTILO">ESTILO</option>
+                    <option value="COMERCIAL">COMERCIAL</option>
+                    <option value="OBJECIONES">OBJECIONES</option>
+                    <option value="GENERAL">GENERAL</option>
+                  </select>
+                  <input
+                    type="text"
+                    value={newRuleInput}
+                    onChange={e => setNewRuleInput(e.target.value)}
+                    placeholder="Agregar nueva regla directa (ej. Usa máximo 1 emoji en el saludo)..."
+                    style={{ flex: 1, minWidth: '220px', background: '#1A1D27', color: '#F1F5F9', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '8px', padding: '0.55rem 0.85rem', fontSize: '0.8rem' }}
+                    onKeyDown={e => { if (e.key === 'Enter') handleAddManualRule(); }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddManualRule}
+                    disabled={addingRule || !newRuleInput.trim()}
+                    style={{ background: '#F59E0B', color: '#000', fontWeight: 800, border: 'none', borderRadius: '8px', padding: '0.55rem 1rem', fontSize: '0.78rem', cursor: 'pointer' }}
+                  >
+                    {addingRule ? 'Guardando...' : '+ Agregar Regla'}
+                  </button>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                  {fidelRules.length === 0 ? (
+                    <div style={{ padding: '2rem', textAlign: 'center', color: '#64748B', fontSize: '0.82rem', border: '1px dashed rgba(255,255,255,0.1)', borderRadius: '12px' }}>
+                      Aún no hay reglas aprendidas. Activa &quot;Entrenar Chat&quot; en una conversación o usa el Simulador Roleplay para corregir a Fidel.
+                    </div>
+                  ) : (
+                    fidelRules.map(rule => (
+                      <div
+                        key={rule.id}
+                        style={{
+                          padding: '0.85rem 1rem',
+                          borderRadius: '12px',
+                          background: rule.isActive ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.015)',
+                          border: rule.isActive ? '1px solid rgba(245,158,11,0.3)' : '1px solid rgba(255,255,255,0.06)',
+                          opacity: rule.isActive ? 1 : 0.6,
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'flex-start',
+                          gap: '1rem',
+                        }}
+                      >
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
+                            <span style={{ fontSize: '0.65rem', fontWeight: 800, padding: '0.15rem 0.45rem', borderRadius: '5px', background: 'rgba(245,158,11,0.2)', color: '#FBBF24' }}>
+                              {rule.category}
+                            </span>
+                            <span style={{ fontSize: '0.68rem', color: '#64748B' }}>
+                              {rule.createdByName || 'Entrenador'}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '0.82rem', color: '#F1F5F9', fontWeight: 500 }}>
+                            {rule.instruction}
+                          </div>
+                          {rule.sourceFeedback && (
+                            <div style={{ fontSize: '0.7rem', color: '#64748B', marginTop: '0.3rem', fontStyle: 'italic' }}>
+                              Origen: &quot;{rule.sourceFeedback}&quot;
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleRule(rule.id, !rule.isActive)}
+                            style={{
+                              padding: '0.3rem 0.65rem',
+                              borderRadius: '6px',
+                              fontSize: '0.7rem',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              border: 'none',
+                              background: rule.isActive ? 'rgba(16,185,129,0.2)' : 'rgba(100,116,139,0.2)',
+                              color: rule.isActive ? '#34D399' : '#94A3B8',
+                            }}
+                          >
+                            {rule.isActive ? 'Activa' : 'Pausada'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteRule(rule.id)}
+                            style={{
+                              padding: '0.3rem 0.55rem',
+                              borderRadius: '6px',
+                              fontSize: '0.7rem',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              border: 'none',
+                              background: 'rgba(239,68,68,0.15)',
+                              color: '#F87171',
+                            }}
+                          >
+                            Eliminar
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                <div style={{ flex: 1, overflowY: 'auto', padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  {sandboxHistory.length === 0 && (
+                    <div style={{ padding: '1.5rem', borderRadius: '12px', background: 'rgba(255,255,255,0.03)', color: '#94A3B8', fontSize: '0.8rem' }}>
+                      Escribe como un cliente para probar a Fidel, o escríbele una corrección (ej. <em>&quot;Entrenador: cuando pregunten por AWS menciona primero el voucher&quot;</em>) para que la guarde automáticamente en su memoria.
+                    </div>
+                  )}
+                  {sandboxHistory.map((item, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        alignSelf: item.role === 'trainer' ? 'flex-end' : 'flex-start',
+                        maxWidth: '80%',
+                        padding: '0.75rem 1rem',
+                        borderRadius: '12px',
+                        background: item.role === 'trainer' ? '#1E293B' : 'rgba(245, 158, 11, 0.14)',
+                        border: item.role === 'fidel' ? '1px solid rgba(245, 158, 11, 0.3)' : 'none',
+                        color: '#F1F5F9',
+                        fontSize: '0.82rem',
+                        whiteSpace: 'pre-wrap',
+                      }}
+                    >
+                      {item.mode && (
+                        <div style={{ fontSize: '0.62rem', fontWeight: 800, color: '#FBBF24', marginBottom: '0.25rem' }}>
+                          MODO: {item.mode}
+                        </div>
+                      )}
+                      {item.text}
+                    </div>
+                  ))}
+                </div>
+                <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid rgba(255,255,255,0.08)', display: 'flex', gap: '0.6rem' }}>
+                  <input
+                    type="text"
+                    value={sandboxInput}
+                    onChange={e => setSandboxInput(e.target.value)}
+                    placeholder="Escribe como cliente o da una corrección (ej. Entrenador: ...)"
+                    style={{ flex: 1, background: '#1A1D27', color: '#F1F5F9', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '10px', padding: '0.65rem 1rem', fontSize: '0.82rem' }}
+                    onKeyDown={e => { if (e.key === 'Enter') handleSendSandboxTraining(); }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleSendSandboxTraining()}
+                    disabled={sandboxSending || !sandboxInput.trim()}
+                    style={{ background: '#F59E0B', color: '#000', fontWeight: 800, border: 'none', borderRadius: '10px', padding: '0.65rem 1.25rem', fontSize: '0.82rem', cursor: 'pointer' }}
+                  >
+                    {sandboxSending ? 'Enviando...' : 'Enviar'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
