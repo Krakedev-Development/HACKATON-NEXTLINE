@@ -1978,14 +1978,20 @@ export default function ChatPage() {
                       }}>
                         <PackageIcon style={{ width: '0.85rem', height: '0.85rem', color: '#C084FC' }} />
                         <span>
-                          {prod === 'ia_docencia'
-                            ? 'Diplomado IA Generativa para Docencia ($350)'
+                          {prod === 'custom_software'
+                            ? 'Software a la Medida (B2B)'
+                            : prod === 'krakedev_academy'
+                            ? 'Academia Krakedev ($40 Matrícula + $280 Módulo)'
+                            : prod === 'aws_certifications'
+                            ? 'Cursos & Certificaciones AWS ($195 - $320)'
+                            : prod === 'ai_assistants_b2b'
+                            ? 'Asistentes de IA para Negocios (Piloto B2B)'
+                            : prod === 'ia_docencia'
+                            ? 'Diplomado IA Generativa para Docencia'
                             : prod === 'aws_pack'
-                            ? 'Pack Dual Certificaciones AWS ($500)'
+                            ? 'Pack Certificaciones AWS'
                             : prod === 'krake_mentor'
-                            ? 'Krake Mentor - Carrera Fullstack & IA'
-                            : prod === 'custom_software'
-                            ? 'Software a Medida & Arquitectura Cloud'
+                            ? 'Krake Mentor'
                             : prod}
                         </span>
                       </div>
