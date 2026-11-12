@@ -1063,10 +1063,14 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
       let replyText = '';
 
       try {
-        // Consumir Fidel MCP Server (Cerebro Central comercial)
+        const inTraining = await this.isConversationInTrainingMode(conversationId, resolvedOrgId);
+
+        // Consumir Fidel MCP Server (Cerebro Central comercial o Entrenamiento)
         const mcpResult = await this.fidelMcp.sendTurn({
           conversationId,
           message: customerMessage,
+          trainingMode: inTraining,
+          trainerName: 'Entrenador',
         });
 
         if (mcpResult.ignoredByAi || !mcpResult.replyText) {
@@ -1075,6 +1079,13 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
         }
 
         replyText = mcpResult.replyText.trim();
+
+        if (mcpResult.learnedRule) {
+          this.chatGateway.server?.to(`org:${resolvedOrgId}`)?.emit('fidel_rule_learned', {
+            conversationId,
+            rule: mcpResult.learnedRule,
+          });
+        }
 
         // Guardar en caché el resultado enriquecido del turno comercial
         const intelPayload = {
@@ -1328,25 +1339,25 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
     return { isTrainingMode, isAiActive };
   }
 
-  async getFidelRules(organizationId: string) {
-    return this.ai.getFidelTrainingRules(organizationId);
+  async getFidelRules(_organizationId: string) {
+    return this.fidelMcp.listTrainingRules();
   }
 
   async addFidelRule(
     organizationId: string,
     params: { instruction: string; category?: string; sourceFeedback?: string; createdByName?: string },
   ) {
-    const rule = await this.ai.addFidelTrainingRule(organizationId, params);
+    const rule = await this.fidelMcp.createTrainingRule(params);
     this.chatGateway.server?.to(`org:${organizationId}`)?.emit('fidel_rule_learned', { rule });
     return rule;
   }
 
-  async toggleFidelRule(organizationId: string, ruleId: string, isActive: boolean) {
-    return this.ai.toggleFidelTrainingRule(organizationId, ruleId, isActive);
+  async toggleFidelRule(_organizationId: string, ruleId: string, isActive: boolean) {
+    return this.fidelMcp.toggleTrainingRule(ruleId, isActive);
   }
 
-  async deleteFidelRule(organizationId: string, ruleId: string) {
-    return this.ai.deleteFidelTrainingRule(organizationId, ruleId);
+  async deleteFidelRule(_organizationId: string, ruleId: string) {
+    return this.fidelMcp.deleteTrainingRule(ruleId);
   }
 
   async runSandboxTrainingTurn(
@@ -1355,17 +1366,21 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
     message: string,
     trainerName?: string,
   ) {
-    const context = history
-      .slice(-10)
-      .map((m) => (m.role === 'trainer' ? `Cliente/Entrenador: ${m.text}` : `Fidel: ${m.text}`))
-      .join('\n');
-    const res = await this.ai.processFidelTrainingTurn(organizationId, context, message, trainerName);
+    const res = await this.fidelMcp.runSandboxTrainingTurn({
+      message,
+      history,
+      trainerName,
+    });
     if (res.learnedRule) {
       this.chatGateway.server?.to(`org:${organizationId}`)?.emit('fidel_rule_learned', {
         rule: res.learnedRule,
       });
     }
-    return res;
+    return {
+      text: res.text,
+      mode: res.mode,
+      learnedRule: res.learnedRule,
+    };
   }
 }
 

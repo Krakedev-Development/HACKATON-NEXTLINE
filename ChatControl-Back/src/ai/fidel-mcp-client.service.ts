@@ -33,6 +33,8 @@ export interface FidelMcpTurnResult {
   summaryUpdated?: boolean;
   mcpExecutions: FidelMcpToolExecution[];
   notice?: string;
+  trainingMode?: 'SETUP' | 'ROLEPLAY' | 'CORRECTION' | string;
+  learnedRule?: any;
 }
 
 @Injectable()
@@ -56,6 +58,8 @@ export class FidelMcpClientService {
     conversationId: string;
     message: string;
     senderRole?: 'user' | 'human_agent';
+    trainingMode?: boolean;
+    trainerName?: string;
   }): Promise<FidelMcpTurnResult> {
     const endpoint = `${this.mcpUrl}/chat/send`;
 
@@ -70,6 +74,8 @@ export class FidelMcpClientService {
           sessionId: params.conversationId,
           message: params.message,
           senderRole: params.senderRole || 'user',
+          trainingMode: params.trainingMode ?? false,
+          trainerName: params.trainerName,
         }),
       });
 
@@ -128,5 +134,90 @@ export class FidelMcpClientService {
       // Ignorar
     }
     return null;
+  }
+
+  async listTrainingRules(): Promise<any[]> {
+    const endpoint = `${this.mcpUrl}/chat/rules`;
+    const response = await fetch(endpoint, {
+      headers: { 'x-tenant-key': this.tenantKey },
+    });
+    if (!response.ok) {
+      throw new Error(`Error listando reglas en Fidel MCP (${response.status})`);
+    }
+    const data = (await response.json()) as { rules?: any[] };
+    return data.rules || [];
+  }
+
+  async createTrainingRule(body: {
+    instruction: string;
+    category?: string;
+    sourceFeedback?: string;
+    createdByName?: string;
+  }): Promise<any> {
+    const endpoint = `${this.mcpUrl}/chat/rules`;
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tenant-key': this.tenantKey,
+      },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      throw new Error(`Error creando regla en Fidel MCP (${response.status})`);
+    }
+    const data = (await response.json()) as { rule?: any };
+    return data.rule;
+  }
+
+  async toggleTrainingRule(ruleId: string, isActive: boolean): Promise<any[]> {
+    const endpoint = `${this.mcpUrl}/chat/rules/${ruleId}`;
+    const response = await fetch(endpoint, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tenant-key': this.tenantKey,
+      },
+      body: JSON.stringify({ isActive }),
+    });
+    if (!response.ok) {
+      throw new Error(`Error actualizando regla en Fidel MCP (${response.status})`);
+    }
+    const data = (await response.json()) as { rules?: any[] };
+    return data.rules || [];
+  }
+
+  async deleteTrainingRule(ruleId: string): Promise<any[]> {
+    const endpoint = `${this.mcpUrl}/chat/rules/${ruleId}`;
+    const response = await fetch(endpoint, {
+      method: 'DELETE',
+      headers: { 'x-tenant-key': this.tenantKey },
+    });
+    if (!response.ok) {
+      throw new Error(`Error eliminando regla en Fidel MCP (${response.status})`);
+    }
+    const data = (await response.json()) as { rules?: any[] };
+    return data.rules || [];
+  }
+
+  async runSandboxTrainingTurn(body: {
+    message: string;
+    history?: Array<{ role: 'trainer' | 'fidel'; text: string }>;
+    trainerName?: string;
+  }): Promise<{ ok: boolean; text: string; mode: string; learnedRule: any }> {
+    const endpoint = `${this.mcpUrl}/chat/training-turn`;
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-tenant-key': this.tenantKey,
+      },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Error en entrenamiento sandbox Fidel MCP (${response.status}): ${errText}`);
+    }
+    return (await response.json()) as { ok: boolean; text: string; mode: string; learnedRule: any };
   }
 }
