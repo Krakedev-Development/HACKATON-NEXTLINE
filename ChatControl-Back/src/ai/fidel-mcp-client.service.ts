@@ -35,6 +35,9 @@ export interface FidelMcpTurnResult {
   notice?: string;
   trainingMode?: 'SETUP' | 'ROLEPLAY' | 'CORRECTION' | string;
   learnedRule?: any;
+  handoffRequested?: boolean;
+  handoffCategory?: 'SUPPORT_OR_FRICTION' | 'SALES_REQUEST' | string | null;
+  withinBusinessHours?: boolean;
 }
 
 @Injectable()

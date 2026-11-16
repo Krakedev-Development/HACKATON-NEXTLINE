@@ -122,4 +122,61 @@ export class LeadAssignmentService {
     const nextIndex = (lastIndex + 1) % agentIds.length;
     return agentIds[nextIndex];
   }
+
+  async assignByFidelRouting(
+    conversationId: string,
+    organizationId: string,
+    params: { detectedProductKey?: string; handoffCategory?: string | null },
+  ): Promise<AssignedResult> {
+    const alreadyAssigned = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { assignedToUserId: true },
+    });
+    if (alreadyAssigned?.assignedToUserId) {
+      return {
+        conversationId,
+        assignedToUserId: alreadyAssigned.assignedToUserId,
+        isNewAssignment: false,
+      };
+    }
+
+    const specialists = await this.integrations.getFidelRoutingSpecialists(organizationId);
+    let targetAgentId: string | null = null;
+
+    if (params.handoffCategory === 'SUPPORT_OR_FRICTION') {
+      targetAgentId = await this.getNextAgentInTurn(organizationId);
+    } else if (
+      params.detectedProductKey === 'aws_certifications' ||
+      params.detectedProductKey === 'krakedev_academy'
+    ) {
+      targetAgentId = specialists.awsAgentId || (await this.getNextAgentInTurn(organizationId));
+    } else if (
+      params.detectedProductKey === 'custom_software' ||
+      params.detectedProductKey === 'ai_assistants_b2b'
+    ) {
+      targetAgentId = specialists.softwareAgentId || (await this.getNextAgentInTurn(organizationId));
+    } else {
+      targetAgentId = await this.getNextAgentInTurn(organizationId);
+    }
+
+    if (!targetAgentId) {
+      return { conversationId, assignedToUserId: null, isNewAssignment: false };
+    }
+
+    await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: {
+        assignedToUserId: targetAgentId,
+        assignedAt: new Date(),
+        isNewLead: true,
+      },
+    });
+
+    this.chatGateway.emitConversationAssigned(organizationId, conversationId, targetAgentId);
+    this.logger.log(
+      `🎯 Lead ${conversationId} asignado por Fidel Routing (${params.handoffCategory || params.detectedProductKey || 'general'}) -> agente=${targetAgentId}`,
+    );
+
+    return { conversationId, assignedToUserId: targetAgentId, isNewAssignment: true };
+  }
 }
