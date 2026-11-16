@@ -158,22 +158,46 @@ export default function AssignmentPage() {
 
   const [successMessage, setSuccessMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [securityKeyInput, setSecurityKeyInput] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [authError, setAuthError] = useState('');
+
+  const openSaveAuthModal = () => {
+    setSecurityKeyInput('');
+    setAuthError('');
+    setShowPassword(false);
+    setShowAuthModal(true);
+  };
 
   const handleSave = async () => {
+    const trimmedKey = securityKeyInput.trim();
+    if (!trimmedKey) {
+      setAuthError('Ingresa la clave de autorización.');
+      return;
+    }
+
     setSaving(true);
     setSuccessMessage('');
     setErrorMessage('');
+    setAuthError('');
     try {
       const agentIds = assignedAgents.map(a => a.id);
-      await updateLeadAssignmentEnabled(isEnabled);
-      await updateLeadAssignmentAgents(agentIds, {
-        awsAgentId: awsAgentId || null,
-        softwareAgentId: softwareAgentId || null,
-      });
+      await updateLeadAssignmentEnabled(isEnabled, trimmedKey);
+      await updateLeadAssignmentAgents(
+        agentIds,
+        {
+          awsAgentId: awsAgentId || null,
+          softwareAgentId: softwareAgentId || null,
+        },
+        trimmedKey,
+      );
+      setShowAuthModal(false);
+      setSecurityKeyInput('');
       setSuccessMessage('Configuración guardada con éxito.');
       setTimeout(() => setSuccessMessage(''), 4000);
     } catch (err: any) {
-      setErrorMessage('Error al guardar: ' + (err.message || 'Error de red'));
+      setAuthError(err?.message || 'Clave de autorización incorrecta');
     } finally {
       setSaving(false);
     }
@@ -337,7 +361,7 @@ export default function AssignmentPage() {
             </div>
           </div>
 
-          <button onClick={handleSave} disabled={saving || assignedAgents.length === 0} style={{ padding: '1.25rem', background: 'linear-gradient(135deg, #EF4444 0%, #B91C1C 100%)', border: 'none', borderRadius: '16px', color: 'white', fontWeight: 900, cursor: 'pointer', boxShadow: '0 10px 30px rgba(239, 68, 68, 0.3)', opacity: assignedAgents.length === 0 ? 0.5 : 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+          <button onClick={openSaveAuthModal} disabled={saving || assignedAgents.length === 0} style={{ padding: '1.25rem', background: 'linear-gradient(135deg, #EF4444 0%, #B91C1C 100%)', border: 'none', borderRadius: '16px', color: 'white', fontWeight: 900, cursor: 'pointer', boxShadow: '0 10px 30px rgba(239, 68, 68, 0.3)', opacity: assignedAgents.length === 0 ? 0.5 : 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
             {saving ? <><Spinner /> GUARDANDO...</> : 'GUARDAR CONFIGURACIÓN'}
           </button>
         </div>
@@ -434,6 +458,65 @@ export default function AssignmentPage() {
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {showAuthModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: '1.5rem' }}>
+          <div style={{ background: '#0B0B0B', border: '1px solid rgba(239, 68, 68, 0.35)', borderRadius: '24px', width: '100%', maxWidth: '460px', padding: '2rem', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.75)' }}>
+            <h2 style={{ fontSize: '1.15rem', fontWeight: 900, color: '#F2F2F2', margin: 0, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Autorización de Seguridad
+            </h2>
+            <p style={{ fontSize: '0.82rem', color: '#8C8C8C', margin: '0.5rem 0 1.25rem', lineHeight: 1.5 }}>
+              Ingresa la clave de autorización designada para guardar cambios en la distribución de leads y especialistas.
+            </p>
+
+            <div style={{ position: 'relative', marginBottom: '0.9rem' }}>
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={securityKeyInput}
+                onChange={(e) => setSecurityKeyInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !saving) handleSave();
+                }}
+                placeholder="Clave de autorización..."
+                autoFocus
+                style={{ width: '100%', background: '#000', border: '1px solid rgba(255,255,255,0.14)', borderRadius: '12px', padding: '0.85rem 4.8rem 0.85rem 1rem', color: '#F2F2F2', fontSize: '0.9rem', outline: 'none' }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(p => !p)}
+                style={{ position: 'absolute', right: '0.6rem', top: '50%', transform: 'translateY(-50%)', background: 'rgba(255,255,255,0.06)', border: 'none', borderRadius: '8px', padding: '0.35rem 0.65rem', color: '#CBD5E1', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}
+              >
+                {showPassword ? 'Ocultar' : 'Ver'}
+              </button>
+            </div>
+
+            {authError && (
+              <div style={{ padding: '0.75rem 0.9rem', background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '10px', color: '#F87171', fontSize: '0.8rem', marginBottom: '1rem' }}>
+                {authError}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '1.25rem' }}>
+              <button
+                type="button"
+                onClick={() => { setShowAuthModal(false); setAuthError(''); }}
+                disabled={saving}
+                style={{ padding: '0.75rem 1.25rem', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: '#CBD5E1', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer' }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving}
+                style={{ padding: '0.75rem 1.35rem', background: 'linear-gradient(135deg, #EF4444 0%, #B91C1C 100%)', border: 'none', borderRadius: '12px', color: '#FFF', fontSize: '0.8rem', fontWeight: 900, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}
+              >
+                {saving ? <><Spinner /> Guardando...</> : 'Confirmar y Guardar'}
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -1,6 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SecretsCryptoService } from '../common/secrets-crypto.service';
+
+const DEFAULT_ASSIGNMENT_SECURITY_KEY = 'NX-7k9P#mQ4vL2$xR8';
 
 export interface IntegrationStatusDto {
   hasWhatsappToken: boolean;
@@ -157,6 +159,18 @@ export class IntegrationsService {
         organizationId,
         'fidel_routing_software_agent_id',
         data.softwareAgentId ? data.softwareAgentId.trim() : '',
+      );
+    }
+  }
+
+  verifyAssignmentSecurityKey(providedKey?: string): void {
+    const expectedKey = (
+      process.env.ASSIGNMENT_SECURITY_KEY || DEFAULT_ASSIGNMENT_SECURITY_KEY
+    ).trim();
+    const cleanProvided = (providedKey || '').trim();
+    if (!cleanProvided || cleanProvided !== expectedKey) {
+      throw new ForbiddenException(
+        'Clave de autorización incorrecta. No tienes permiso para modificar las asignaciones.',
       );
     }
   }

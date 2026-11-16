@@ -6,8 +6,17 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthUser } from '../auth/auth.types';
 import { OrgMemberGuard } from '../auth/org-member.guard';
 import { UserRole } from '@prisma/client';
-import { IsArray, IsOptional, IsString } from 'class-validator';
+import { IsArray, IsBoolean, IsOptional, IsString } from 'class-validator';
 import { IntegrationsService, type UpdateIntegrationsDto } from './integrations.service';
+
+class LeadAssignmentEnabledDto {
+  @IsBoolean()
+  enabled!: boolean;
+
+  @IsOptional()
+  @IsString()
+  securityKey?: string;
+}
 
 class LeadAssignmentAgentsDto {
   @IsArray()
@@ -21,6 +30,10 @@ class LeadAssignmentAgentsDto {
   @IsOptional()
   @IsString()
   softwareAgentId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  securityKey?: string;
 }
 
 @Controller('org/integrations')
@@ -48,8 +61,9 @@ export class IntegrationsController {
   @Patch('lead-assignment-enabled')
   async updateLeadAssignmentEnabled(
     @CurrentUser() user: AuthUser,
-    @Body() body: { enabled: boolean },
+    @Body() body: LeadAssignmentEnabledDto,
   ) {
+    this.integrations.verifyAssignmentSecurityKey(body.securityKey);
     await this.integrations.updateLeadAssignmentEnabled(user.organizationId!, body.enabled);
     return { enabled: body.enabled };
   }
@@ -72,6 +86,7 @@ export class IntegrationsController {
     @CurrentUser() user: AuthUser,
     @Body() dto: LeadAssignmentAgentsDto,
   ) {
+    this.integrations.verifyAssignmentSecurityKey(dto.securityKey);
     await this.integrations.updateLeadAssignmentAgents(user.organizationId!, dto.agentIds);
     await this.integrations.updateFidelRoutingSpecialists(user.organizationId!, {
       awsAgentId: dto.awsAgentId,

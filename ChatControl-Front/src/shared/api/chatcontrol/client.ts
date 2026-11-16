@@ -778,10 +778,13 @@ export async function getLeadAssignmentEnabled(): Promise<{ enabled: boolean }> 
   return api<{ enabled: boolean }>('/org/integrations/lead-assignment-enabled');
 }
 
-export async function updateLeadAssignmentEnabled(enabled: boolean): Promise<{ enabled: boolean }> {
+export async function updateLeadAssignmentEnabled(
+  enabled: boolean,
+  securityKey?: string,
+): Promise<{ enabled: boolean }> {
   return api<{ enabled: boolean }>('/org/integrations/lead-assignment-enabled', {
     method: 'PATCH',
-    body: JSON.stringify({ enabled }),
+    body: JSON.stringify({ enabled, securityKey }),
   });
 }
 
@@ -792,10 +795,11 @@ export async function getLeadAssignmentAgents(): Promise<LeadAssignmentAgents> {
 export async function updateLeadAssignmentAgents(
   agentIds: string[],
   specialists?: { awsAgentId?: string | null; softwareAgentId?: string | null },
+  securityKey?: string,
 ): Promise<LeadAssignmentAgents> {
   return api<LeadAssignmentAgents>('/org/integrations/lead-assignment', {
     method: 'PATCH',
-    body: JSON.stringify({ agentIds, ...(specialists || {}) }),
+    body: JSON.stringify({ agentIds, ...(specialists || {}), securityKey }),
   });
 }
 
