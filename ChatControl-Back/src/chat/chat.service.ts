@@ -643,6 +643,7 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
         where: { id: params.conversationId },
         data: { isAiActive: false },
       });
+      void this.fidelMcp.setSessionStatus(params.conversationId, 'HUMAN_ACTIVE');
       this.chatGateway.server?.to(`org:${params.organizationId}`)?.emit('conversation_ai_status_updated', {
         conversationId: params.conversationId,
         isAiActive: false,
@@ -1000,7 +1001,10 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
 
     const conv = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
-      include: { contact: { select: { organizationId: true, phone: true } } },
+      include: {
+        contact: { select: { organizationId: true, phone: true } },
+        campaign: { select: { name: true } },
+      },
     });
     if (!conv || !conv.isAiActive) {
       this.logger.log(`Fidel omitido: la conversación ${conversationId} tiene isAiActive=false`);
@@ -1065,10 +1069,18 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
       try {
         const inTraining = await this.isConversationInTrainingMode(conversationId, resolvedOrgId);
 
+        const adRef = conv.adReferral as Record<string, any> | null;
+        const campaignName = conv.campaign?.name || '';
+        const hasAdContext = !!(adRef?.headline || adRef?.body || campaignName);
+        const messageForMcp =
+          !inTraining && hasAdContext && ordered.length <= 3
+            ? `[CONTEXTO PUBLICIDAD META: El cliente ingresó por campaña publicitaria -> Campaña: "${campaignName || 'Meta Ads'}" | Anuncio: "${adRef?.headline || ''}" (${adRef?.body || ''}). Enfócate directamente en este producto/servicio desde el inicio sin preguntar por qué nos contacta.]\n\nMensaje del cliente: ${customerMessage}`
+            : customerMessage;
+
         // Consumir Fidel MCP Server (Cerebro Central comercial o Entrenamiento)
         const mcpResult = await this.fidelMcp.sendTurn({
           conversationId,
-          message: customerMessage,
+          message: messageForMcp,
           trainingMode: inTraining,
           trainerName: 'Entrenador',
         });
@@ -1085,6 +1097,26 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
             conversationId,
             rule: mcpResult.learnedRule,
           });
+        }
+
+        const shouldAutoAssign =
+          !inTraining &&
+          !conv.assignedToUserId &&
+          (mcpResult.handoffRequested === true ||
+            mcpResult.intentLevel === 'ALTO' ||
+            mcpResult.handoffCategory === 'SUPPORT_OR_FRICTION');
+
+        if (shouldAutoAssign) {
+          try {
+            await this.leadAssignment.assignByFidelRouting(conversationId, resolvedOrgId, {
+              detectedProductKey: mcpResult.detectedProductKey,
+              handoffCategory: mcpResult.handoffCategory,
+            });
+          } catch (assignErr: any) {
+            this.logger.warn(
+              `No se pudo auto-asignar conversación ${conversationId}: ${assignErr?.message || assignErr}`,
+            );
+          }
         }
 
         // Guardar en caché el resultado enriquecido del turno comercial

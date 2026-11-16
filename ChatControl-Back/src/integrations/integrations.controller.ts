@@ -6,13 +6,21 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { AuthUser } from '../auth/auth.types';
 import { OrgMemberGuard } from '../auth/org-member.guard';
 import { UserRole } from '@prisma/client';
-import { IsArray, IsString } from 'class-validator';
+import { IsArray, IsOptional, IsString } from 'class-validator';
 import { IntegrationsService, type UpdateIntegrationsDto } from './integrations.service';
 
 class LeadAssignmentAgentsDto {
   @IsArray()
   @IsString({ each: true })
   agentIds!: string[];
+
+  @IsOptional()
+  @IsString()
+  awsAgentId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  softwareAgentId?: string | null;
 }
 
 @Controller('org/integrations')
@@ -48,8 +56,15 @@ export class IntegrationsController {
 
   @Get('lead-assignment')
   async getLeadAssignment(@CurrentUser() user: AuthUser) {
-    const agentIds = await this.integrations.getLeadAssignmentAgents(user.organizationId!);
-    return { agentIds };
+    const [agentIds, specialists] = await Promise.all([
+      this.integrations.getLeadAssignmentAgents(user.organizationId!),
+      this.integrations.getFidelRoutingSpecialists(user.organizationId!),
+    ]);
+    return {
+      agentIds,
+      awsAgentId: specialists.awsAgentId,
+      softwareAgentId: specialists.softwareAgentId,
+    };
   }
 
   @Patch('lead-assignment')
@@ -58,6 +73,15 @@ export class IntegrationsController {
     @Body() dto: LeadAssignmentAgentsDto,
   ) {
     await this.integrations.updateLeadAssignmentAgents(user.organizationId!, dto.agentIds);
-    return { agentIds: dto.agentIds };
+    await this.integrations.updateFidelRoutingSpecialists(user.organizationId!, {
+      awsAgentId: dto.awsAgentId,
+      softwareAgentId: dto.softwareAgentId,
+    });
+    const specialists = await this.integrations.getFidelRoutingSpecialists(user.organizationId!);
+    return {
+      agentIds: dto.agentIds,
+      awsAgentId: specialists.awsAgentId,
+      softwareAgentId: specialists.softwareAgentId,
+    };
   }
 }

@@ -770,6 +770,8 @@ export interface OrgOutboundAuditRow {
 
 export interface LeadAssignmentAgents {
   agentIds: string[];
+  awsAgentId?: string | null;
+  softwareAgentId?: string | null;
 }
 
 export async function getLeadAssignmentEnabled(): Promise<{ enabled: boolean }> {
@@ -787,10 +789,13 @@ export async function getLeadAssignmentAgents(): Promise<LeadAssignmentAgents> {
   return api<LeadAssignmentAgents>('/org/integrations/lead-assignment');
 }
 
-export async function updateLeadAssignmentAgents(agentIds: string[]): Promise<LeadAssignmentAgents> {
+export async function updateLeadAssignmentAgents(
+  agentIds: string[],
+  specialists?: { awsAgentId?: string | null; softwareAgentId?: string | null },
+): Promise<LeadAssignmentAgents> {
   return api<LeadAssignmentAgents>('/org/integrations/lead-assignment', {
     method: 'PATCH',
-    body: JSON.stringify({ agentIds }),
+    body: JSON.stringify({ agentIds, ...(specialists || {}) }),
   });
 }
 

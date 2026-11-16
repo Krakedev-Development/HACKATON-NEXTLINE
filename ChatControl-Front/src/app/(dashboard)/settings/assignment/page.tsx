@@ -84,6 +84,8 @@ export default function AssignmentPage() {
   const pageSize = 10;
 
   const [nextAgentId, setNextAgentId] = useState<string | null>(null);
+  const [awsAgentId, setAwsAgentId] = useState<string>('');
+  const [softwareAgentId, setSoftwareAgentId] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -105,6 +107,8 @@ export default function AssignmentPage() {
 
         const leadAssignment = await getLeadAssignmentAgents();
         const agentIds: string[] = leadAssignment.agentIds || [];
+        setAwsAgentId(leadAssignment.awsAgentId || '');
+        setSoftwareAgentId(leadAssignment.softwareAgentId || '');
 
         const mappedAgents: AgentInTurn[] = agentIds
           .map(id => {
@@ -162,7 +166,10 @@ export default function AssignmentPage() {
     try {
       const agentIds = assignedAgents.map(a => a.id);
       await updateLeadAssignmentEnabled(isEnabled);
-      await updateLeadAssignmentAgents(agentIds);
+      await updateLeadAssignmentAgents(agentIds, {
+        awsAgentId: awsAgentId || null,
+        softwareAgentId: softwareAgentId || null,
+      });
       setSuccessMessage('Configuración guardada con éxito.');
       setTimeout(() => setSuccessMessage(''), 4000);
     } catch (err: any) {
@@ -283,6 +290,51 @@ export default function AssignmentPage() {
                 ))}
               </div>
             )}
+          </div>
+
+          <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '24px', padding: '2rem' }}>
+            <h3 style={{ fontSize: '1.1rem', fontWeight: 800, color: '#F2F2F2', margin: '0 0 0.4rem', textTransform: 'uppercase' }}>
+              Especialistas por Línea de Negocio (Fidel MCP)
+            </h3>
+            <p style={{ margin: '0 0 1.5rem', fontSize: '0.82rem', color: '#8C8C8C', lineHeight: 1.5 }}>
+              Los clientes molestos, pidiendo avances de su proyecto o aclarando dudas se asignarán de 1 en 1 (Round-Robin) entre los integrantes seleccionados arriba.
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1.25rem' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#CBD5E1', marginBottom: '0.5rem' }}>
+                  Asesor Especialista para AWS & Academia Krakedev
+                </label>
+                <select
+                  value={awsAgentId}
+                  onChange={(e) => setAwsAgentId(e.target.value)}
+                  style={{ width: '100%', background: '#0B0B0B', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '12px', padding: '0.75rem 1rem', color: '#F2F2F2', fontSize: '0.85rem', outline: 'none' }}
+                >
+                  <option value="">Rotación general 1 a 1</option>
+                  {allOrgUsers.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.displayName || u.email} ({u.email})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, color: '#CBD5E1', marginBottom: '0.5rem' }}>
+                  Asesor Especialista para Software a la Medida & IA
+                </label>
+                <select
+                  value={softwareAgentId}
+                  onChange={(e) => setSoftwareAgentId(e.target.value)}
+                  style={{ width: '100%', background: '#0B0B0B', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '12px', padding: '0.75rem 1rem', color: '#F2F2F2', fontSize: '0.85rem', outline: 'none' }}
+                >
+                  <option value="">Rotación general 1 a 1</option>
+                  {allOrgUsers.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.displayName || u.email} ({u.email})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
           </div>
 
           <button onClick={handleSave} disabled={saving || assignedAgents.length === 0} style={{ padding: '1.25rem', background: 'linear-gradient(135deg, #EF4444 0%, #B91C1C 100%)', border: 'none', borderRadius: '16px', color: 'white', fontWeight: 900, cursor: 'pointer', boxShadow: '0 10px 30px rgba(239, 68, 68, 0.3)', opacity: assignedAgents.length === 0 ? 0.5 : 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>

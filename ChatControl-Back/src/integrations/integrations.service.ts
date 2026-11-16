@@ -128,4 +128,36 @@ export class IntegrationsService {
   async updateLeadAssignmentAgents(organizationId: string, agentIds: string[]): Promise<void> {
     await this.setSetting(organizationId, 'lead_assignment_agents', JSON.stringify(agentIds));
   }
+
+  async getFidelRoutingSpecialists(
+    organizationId: string,
+  ): Promise<{ awsAgentId: string | null; softwareAgentId: string | null }> {
+    const awsAgentId = (await this.getSetting(organizationId, 'fidel_routing_aws_agent_id')) || null;
+    const softwareAgentId =
+      (await this.getSetting(organizationId, 'fidel_routing_software_agent_id')) || null;
+    return {
+      awsAgentId: awsAgentId?.trim() || null,
+      softwareAgentId: softwareAgentId?.trim() || null,
+    };
+  }
+
+  async updateFidelRoutingSpecialists(
+    organizationId: string,
+    data: { awsAgentId?: string | null; softwareAgentId?: string | null },
+  ): Promise<void> {
+    if (data.awsAgentId !== undefined) {
+      await this.setSetting(
+        organizationId,
+        'fidel_routing_aws_agent_id',
+        data.awsAgentId ? data.awsAgentId.trim() : '',
+      );
+    }
+    if (data.softwareAgentId !== undefined) {
+      await this.setSetting(
+        organizationId,
+        'fidel_routing_software_agent_id',
+        data.softwareAgentId ? data.softwareAgentId.trim() : '',
+      );
+    }
+  }
 }
