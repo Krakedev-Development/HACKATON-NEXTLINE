@@ -73,40 +73,65 @@ export class FidelMcpClientService {
     };
   }): Promise<FidelMcpTurnResult> {
     const endpoint = `${this.mcpUrl}/chat/send`;
+    const maxAttempts = 3;
+    let lastError: any;
 
-    try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-tenant-key': this.tenantKey,
-        },
-        body: JSON.stringify({
-          sessionId: params.conversationId,
-          message: params.message,
-          senderRole: params.senderRole || 'user',
-          trainingMode: params.trainingMode ?? false,
-          trainerName: params.trainerName,
-          adContext: params.adContext,
-        }),
-      });
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-tenant-key': this.tenantKey,
+          },
+          body: JSON.stringify({
+            sessionId: params.conversationId,
+            message: params.message,
+            senderRole: params.senderRole || 'user',
+            trainingMode: params.trainingMode ?? false,
+            trainerName: params.trainerName,
+            adContext: params.adContext,
+          }),
+          signal: AbortSignal.timeout(25_000),
+        });
 
-      if (!response.ok) {
-        const errorText = await response.text();
+        if (!response.ok) {
+          const errorText = await response.text();
+          const isTransient = [429, 502, 503, 504].includes(response.status);
+          if (isTransient && attempt < maxAttempts) {
+            this.logger.warn(
+              `Fidel MCP HTTP ${response.status} (intento ${attempt}/${maxAttempts}). Reintentando en 3s...`,
+            );
+            await new Promise((r) => setTimeout(r, 3000));
+            continue;
+          }
+          this.logger.error(
+            `Error en respuesta de Fidel MCP (${response.status}): ${errorText}`,
+          );
+          throw new Error(`Fidel MCP respondió con status ${response.status}: ${errorText}`);
+        }
+
+        const data = (await response.json()) as FidelMcpTurnResult;
+        return data;
+      } catch (err: any) {
+        lastError = err;
+        const msg = err?.message || String(err);
+        const isClientHttpError = msg.startsWith('Fidel MCP respondió con status 4') && !msg.includes('429');
+        if (!isClientHttpError && attempt < maxAttempts) {
+          this.logger.warn(
+            `Fallo temporal con Fidel MCP (intento ${attempt}/${maxAttempts}): ${msg}. Reintentando en 3s...`,
+          );
+          await new Promise((r) => setTimeout(r, 3000));
+          continue;
+        }
         this.logger.error(
-          `Error en respuesta de Fidel MCP (${response.status}): ${errorText}`,
+          `Fallo al comunicarse con Fidel MCP en ${endpoint}: ${msg}`,
         );
-        throw new Error(`Fidel MCP respondió con status ${response.status}: ${errorText}`);
+        throw err;
       }
-
-      const data = (await response.json()) as FidelMcpTurnResult;
-      return data;
-    } catch (err: any) {
-      this.logger.error(
-        `Fallo al comunicarse con Fidel MCP en ${endpoint}: ${err?.message || err}`,
-      );
-      throw err;
     }
+
+    throw lastError;
   }
 
   async setSessionStatus(
