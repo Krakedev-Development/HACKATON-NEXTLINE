@@ -890,6 +890,7 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
   private readonly processedIncomingMsgIds = new Set<string>();
   private readonly executingFidelConversations = new Set<string>();
   private readonly repliedIncomingMsgIds = new Set<string>();
+  private readonly failedReplyAttempts = new Map<string, number>();
   private readonly startedAt = new Date();
   private remotePollerTimer: NodeJS.Timeout | null = null;
   private isPollingRemote = false;
@@ -915,7 +916,7 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
     if (this.isPollingRemote) return;
     this.isPollingRemote = true;
     try {
-      const recentCutoff = new Date(Date.now() - 30_000);
+      const recentCutoff = new Date(Date.now() - 5 * 60_000);
       const convs = await this.prisma.conversation.findMany({
         where: {
           OR: [
@@ -936,30 +937,39 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
         const lastMsg = conv.messages[0];
         if (!lastMsg) continue;
         if (lastMsg.direction !== MessageDirection.IN) continue;
-        if (lastMsg.createdAt < this.startedAt) continue;
-        if (this.processedIncomingMsgIds.has(lastMsg.id)) continue;
+        if (lastMsg.createdAt < recentCutoff) continue;
 
-        this.processedIncomingMsgIds.add(lastMsg.id);
+        if (!this.processedIncomingMsgIds.has(lastMsg.id)) {
+          this.processedIncomingMsgIds.add(lastMsg.id);
+          if (lastMsg.createdAt >= this.startedAt) {
+            this.chatGateway.emitNewMessage(conv.contact.organizationId, conv.id, {
+              id: lastMsg.id,
+              conversationId: conv.id,
+              fromUser: true,
+              text: lastMsg.body,
+              timestamp: lastMsg.whatsappTimestamp.getTime(),
+              mediaUrl: lastMsg.mediaUrl,
+              mimeType: lastMsg.mimeType,
+              fileName: lastMsg.fileName,
+              type: lastMsg.type,
+              status: lastMsg.status,
+            } as any);
+          }
+        }
 
-        // Si ya respondimos a este mensaje entrante, no disparar Fidel de nuevo
-        if (this.repliedIncomingMsgIds.has(lastMsg.id)) continue;
-
-        this.chatGateway.emitNewMessage(conv.contact.organizationId, conv.id, {
-          id: lastMsg.id,
-          conversationId: conv.id,
-          fromUser: true,
-          text: lastMsg.body,
-          timestamp: lastMsg.whatsappTimestamp.getTime(),
-          mediaUrl: lastMsg.mediaUrl,
-          mimeType: lastMsg.mimeType,
-          fileName: lastMsg.fileName,
-          type: lastMsg.type,
-          status: lastMsg.status,
-        } as any);
-
-        if (conv.isAiActive === true) {
-          this.logger.log(`Mensaje remoto detectado en conv=${conv.id} con Fidel activo. Disparando respuesta...`);
-          this.triggerFidelAutoReply(conv.contact.organizationId, conv.id, conv.contact.phone);
+        // Recuperar mensajes pendientes de respuesta (ej. tras timeout o reinicio del servidor)
+        const pendingAgeMs = Date.now() - lastMsg.createdAt.getTime();
+        if (
+          conv.isAiActive === true &&
+          pendingAgeMs >= 8_000 &&
+          !this.repliedIncomingMsgIds.has(lastMsg.id) &&
+          !this.executingFidelConversations.has(conv.id) &&
+          !this.fidelDebounceTimers.has(conv.id)
+        ) {
+          this.logger.log(
+            `Mensaje pendiente detectado (${Math.round(pendingAgeMs / 1000)}s) en conv=${conv.id}. Disparando Fidel...`,
+          );
+          this.triggerFidelAutoReply(conv.contact.organizationId, conv.id, conv.contact.phone, 500);
         }
       }
     } catch (err) {
@@ -1051,12 +1061,24 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
       return null;
     }
 
-    // Registrar ejecución en curso y marcar el mensaje como respondido
+    // Registrar ejecución en curso (sin marcar aún como respondido hasta confirmar respuesta exitosa)
     this.executingFidelConversations.add(conversationId);
-    this.repliedIncomingMsgIds.add(lastIn.id);
-    if (this.repliedIncomingMsgIds.size > 2000) {
-      this.repliedIncomingMsgIds.clear();
-    }
+    const markAsReplied = () => {
+      this.repliedIncomingMsgIds.add(lastIn.id);
+      this.failedReplyAttempts.delete(lastIn.id);
+      if (this.repliedIncomingMsgIds.size > 2000) {
+        this.repliedIncomingMsgIds.clear();
+      }
+    };
+    const registerFailure = () => {
+      const nextCount = (this.failedReplyAttempts.get(lastIn.id) ?? 0) + 1;
+      if (nextCount >= 3) {
+        this.logger.warn(`Fidel agotó 3 reintentos para msg=${lastIn.id} en conv=${conversationId}`);
+        markAsReplied();
+      } else {
+        this.failedReplyAttempts.set(lastIn.id, nextCount);
+      }
+    };
 
     try {
       const recent = ordered.map((m) =>
@@ -1101,6 +1123,11 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
 
         if (mcpResult.ignoredByAi || !mcpResult.replyText) {
           this.logger.log(`Fidel MCP está en Modo Espejo (HUMAN_ACTIVE) para conv=${conversationId}`);
+          if (mcpResult.ignoredByAi) {
+            markAsReplied();
+          } else {
+            registerFailure();
+          }
           return null;
         }
 
@@ -1159,11 +1186,15 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
           const fallback = await this.ai.generateReply(resolvedOrgId, context);
           replyText = fallback.text?.trim() || '';
         } catch {
+          registerFailure();
           return null;
         }
       }
 
-      if (!replyText) return null;
+      if (!replyText) {
+        registerFailure();
+        return null;
+      }
 
       // 5. DOBLE CHECK EN BD: Si otra instancia o proceso respondió mientras Fidel MCP pensaba, abortar envío
       const concurrentOut = await this.prisma.message.findFirst({
@@ -1175,6 +1206,7 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
         select: { id: true },
       });
       if (concurrentOut) {
+        markAsReplied();
         this.logger.warn(`Fidel cancelado por doble check: otra respuesta ya fue enviada para conv=${conversationId}`);
         return null;
       }
@@ -1201,6 +1233,7 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
           whatsappTimestamp: new Date(),
         },
       });
+      markAsReplied();
 
       const msgPayload: any = {
         id: created.id,
