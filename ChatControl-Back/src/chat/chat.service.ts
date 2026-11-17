@@ -1069,20 +1069,34 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
       try {
         const inTraining = await this.isConversationInTrainingMode(conversationId, resolvedOrgId);
 
-        const adRef = conv.adReferral as Record<string, any> | null;
-        const campaignName = conv.campaign?.name || '';
-        const hasAdContext = !!(adRef?.headline || adRef?.body || campaignName);
-        const messageForMcp =
-          !inTraining && hasAdContext && ordered.length <= 3
-            ? `[CONTEXTO PUBLICIDAD META: El cliente ingresó por campaña publicitaria -> Campaña: "${campaignName || 'Meta Ads'}" | Anuncio: "${adRef?.headline || ''}" (${adRef?.body || ''}). Enfócate directamente en este producto/servicio desde el inicio sin preguntar por qué nos contacta.]\n\nMensaje del cliente: ${customerMessage}`
-            : customerMessage;
+        const msgWithRef = ordered.find((m) => (m as any).referral);
+        const adRef = ((conv.adReferral as any) || (msgWithRef as any)?.referral || null) as Record<
+          string,
+          any
+        > | null;
+        const welcomeText =
+          typeof adRef?.welcome_message === 'string'
+            ? adRef.welcome_message
+            : adRef?.welcome_message?.text;
+        const adContext =
+          !inTraining && (adRef || conv.campaign?.name)
+            ? {
+                sourceId: adRef?.source_id || undefined,
+                headline: adRef?.headline || undefined,
+                body: adRef?.body || undefined,
+                welcomeText: welcomeText || undefined,
+                imageUrl: adRef?.image_url || adRef?.thumbnail_url || undefined,
+                campaignName: conv.campaign?.name || undefined,
+              }
+            : undefined;
 
         // Consumir Fidel MCP Server (Cerebro Central comercial o Entrenamiento)
         const mcpResult = await this.fidelMcp.sendTurn({
           conversationId,
-          message: messageForMcp,
+          message: customerMessage,
           trainingMode: inTraining,
           trainerName: 'Entrenador',
+          adContext,
         });
 
         if (mcpResult.ignoredByAi || !mcpResult.replyText) {
