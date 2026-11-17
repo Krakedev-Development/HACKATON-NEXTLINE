@@ -63,6 +63,14 @@ export class FidelMcpClientService {
     senderRole?: 'user' | 'human_agent';
     trainingMode?: boolean;
     trainerName?: string;
+    adContext?: {
+      sourceId?: string;
+      headline?: string;
+      body?: string;
+      welcomeText?: string;
+      imageUrl?: string;
+      campaignName?: string;
+    };
   }): Promise<FidelMcpTurnResult> {
     const endpoint = `${this.mcpUrl}/chat/send`;
 
@@ -79,6 +87,7 @@ export class FidelMcpClientService {
           senderRole: params.senderRole || 'user',
           trainingMode: params.trainingMode ?? false,
           trainerName: params.trainerName,
+          adContext: params.adContext,
         }),
       });
 
