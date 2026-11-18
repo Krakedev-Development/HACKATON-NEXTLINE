@@ -890,7 +890,7 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
   private readonly processedIncomingMsgIds = new Set<string>();
   private readonly executingFidelConversations = new Set<string>();
   private readonly repliedIncomingMsgIds = new Set<string>();
-  private readonly failedReplyAttempts = new Map<string, number>();
+  private readonly failedReplyAttempts = new Map<string, { count: number; nextRetryAt: number }>();
   private readonly startedAt = new Date();
   private remotePollerTimer: NodeJS.Timeout | null = null;
   private isPollingRemote = false;
@@ -916,7 +916,7 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
     if (this.isPollingRemote) return;
     this.isPollingRemote = true;
     try {
-      const recentCutoff = new Date(Date.now() - 5 * 60_000);
+      const recentCutoff = new Date(Date.now() - 60 * 60_000);
       const convs = await this.prisma.conversation.findMany({
         where: {
           OR: [
@@ -959,9 +959,12 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
 
         // Recuperar mensajes pendientes de respuesta (ej. tras timeout o reinicio del servidor)
         const pendingAgeMs = Date.now() - lastMsg.createdAt.getTime();
+        const attemptInfo = this.failedReplyAttempts.get(lastMsg.id);
+        const waitingBackoff = attemptInfo ? Date.now() < attemptInfo.nextRetryAt : false;
         if (
           conv.isAiActive === true &&
           pendingAgeMs >= 8_000 &&
+          !waitingBackoff &&
           !this.repliedIncomingMsgIds.has(lastMsg.id) &&
           !this.executingFidelConversations.has(conv.id) &&
           !this.fidelDebounceTimers.has(conv.id)
@@ -1071,12 +1074,17 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
       }
     };
     const registerFailure = () => {
-      const nextCount = (this.failedReplyAttempts.get(lastIn.id) ?? 0) + 1;
+      const prev = this.failedReplyAttempts.get(lastIn.id);
+      const nextCount = (prev?.count ?? 0) + 1;
       if (nextCount >= 3) {
         this.logger.warn(`Fidel agotó 3 reintentos para msg=${lastIn.id} en conv=${conversationId}`);
         markAsReplied();
       } else {
-        this.failedReplyAttempts.set(lastIn.id, nextCount);
+        const delayMs = nextCount === 1 ? 30_000 : 120_000;
+        this.failedReplyAttempts.set(lastIn.id, {
+          count: nextCount,
+          nextRetryAt: Date.now() + delayMs,
+        });
       }
     };
 

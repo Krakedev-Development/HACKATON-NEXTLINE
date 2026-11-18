@@ -92,7 +92,7 @@ export class FidelMcpClientService {
             trainerName: params.trainerName,
             adContext: params.adContext,
           }),
-          signal: AbortSignal.timeout(25_000),
+          signal: AbortSignal.timeout(45_000),
         });
 
         if (!response.ok) {
