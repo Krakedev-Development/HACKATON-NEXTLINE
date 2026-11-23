@@ -997,8 +997,8 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
           `⏰ Seguimiento etapa ${item.stage}/3 enviado para conv=${conversationId}`,
         );
       }
-    } catch {
-      // Silenciar errores transitorios de polling
+    } catch (err: any) {
+      this.logger.warn(`Error en poller de seguimiento Fidel: ${err?.message || err}`);
     } finally {
       this.isPollingFollowUps = false;
     }

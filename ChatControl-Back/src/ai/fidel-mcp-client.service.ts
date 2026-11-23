@@ -273,13 +273,15 @@ export class FidelMcpClientService {
         signal: AbortSignal.timeout(25_000),
       });
       if (!response.ok) {
+        this.logger.warn(`Fidel MCP follow-ups HTTP ${response.status}`);
         return [];
       }
       const data = (await response.json()) as {
         followUps?: Array<{ sessionId: string; stage: number; messageText: string }>;
       };
       return Array.isArray(data.followUps) ? data.followUps : [];
-    } catch {
+    } catch (err: any) {
+      this.logger.warn(`Error consultando follow-ups en Fidel MCP: ${err?.message || err}`);
       return [];
     }
   }
