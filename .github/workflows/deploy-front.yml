@@ -6,7 +6,7 @@ name: deploy-front
 
 on:
   push:
-    branches: [prod]
+    branches: [main]
     paths:
       - 'ChatControl-Front/**'
       - '!ChatControl-Front/docs/**'
@@ -111,5 +111,5 @@ jobs:
 
       - name: Resumen
         if: success()
-        run: echo "Front desplegado en https://hackaton.krakedev.com (commit $GITHUB_SHA)."
+        run: echo "Front desplegado en https://nextline.clearmindsec.com (commit $GITHUB_SHA)."
         working-directory: .

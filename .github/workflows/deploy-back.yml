@@ -6,7 +6,7 @@ name: deploy-back
 
 on:
   push:
-    branches: [prod]
+    branches: [main]
     paths:
       - 'ChatControl-Back/**'
       - '!ChatControl-Back/docs/**'
@@ -109,5 +109,5 @@ jobs:
 
       - name: Resumen
         if: success()
-        run: echo "API desplegada en https://api.hackaton.krakedev.com (commit $GITHUB_SHA)."
+        run: echo "API desplegada en https://api.nextline.clearmindsec.com (commit $GITHUB_SHA)."
         working-directory: .
