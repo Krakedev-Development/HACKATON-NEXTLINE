@@ -1,0 +1,5 @@
+# Los scripts y workflows se ejecutan en Linux; se guardan siempre con LF.
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+Dockerfile text eol=lf

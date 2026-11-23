@@ -1,0 +1,17 @@
+node_modules
+.next
+out
+dist
+coverage
+.git
+.gitignore
+.github
+deploy
+docs
+.env
+.env.*
+*.local
+*.log
+tsconfig.tsbuildinfo
+.agents
+.kiro

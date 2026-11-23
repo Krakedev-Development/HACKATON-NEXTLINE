@@ -1,0 +1,115 @@
+name: deploy-front
+
+# Despliegue del front (Next.js) en la VPS.
+# GitHub solo lee los workflows de la raíz del repositorio, no los de cada subproyecto.
+# Flujo: verificar -> empaquetar -> SCP -> script remoto -> build -> healthcheck -> rollback.
+
+on:
+  push:
+    branches: [prod]
+    paths:
+      - 'ChatControl-Front/**'
+      - '!ChatControl-Front/docs/**'
+      - '!ChatControl-Front/*.md'
+      - '.github/workflows/deploy-front.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-chatcontrol-front
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: ChatControl-Front
+
+jobs:
+  verificar:
+    name: Verificar codigo
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.0.8
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ChatControl-Front/pnpm-lock.yaml
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      - name: Compilar
+        run: pnpm run build
+
+  desplegar:
+    name: Desplegar en VPS
+    needs: verificar
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Empaquetar release
+        run: |
+          set -euo pipefail
+          rm -rf .deploy-artifacts
+          mkdir -p .deploy-artifacts
+          tar --exclude-vcs \
+            --exclude=.deploy-artifacts \
+            --exclude=node_modules \
+            --exclude=.next \
+            --exclude=deploy \
+            --exclude=docs \
+            --exclude='.env' \
+            --exclude='.env.*' \
+            --exclude='*.log' \
+            -czf .deploy-artifacts/release.tgz .
+          mv .deploy-artifacts/release.tgz "${GITHUB_WORKSPACE}/release.tgz"
+          ls -lh "${GITHUB_WORKSPACE}/release.tgz"
+
+      - name: Preparar acceso SSH
+        env:
+          VPS_SSH_KEY_B64: ${{ secrets.VPS_SSH_KEY_B64 }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s' "$VPS_SSH_KEY_B64" | base64 -d > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+        working-directory: .
+
+      - name: Subir release y script
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          scp -i ~/.ssh/id_deploy release.tgz "$VPS_USER@$VPS_HOST:/tmp/chatcontrol-front.tgz"
+          scp -i ~/.ssh/id_deploy ChatControl-Front/deploy/vps-deploy-web.sh "$VPS_USER@$VPS_HOST:/tmp/chatcontrol-front-deploy.sh"
+        working-directory: .
+
+      - name: Desplegar
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/id_deploy "$VPS_USER@$VPS_HOST" \
+            "chmod +x /tmp/chatcontrol-front-deploy.sh && bash /tmp/chatcontrol-front-deploy.sh /tmp/chatcontrol-front.tgz '${GITHUB_SHA}'"
+        working-directory: .
+
+      - name: Resumen
+        if: success()
+        run: echo "Front desplegado en https://hackaton.krakedev.com (commit $GITHUB_SHA)."
+        working-directory: .

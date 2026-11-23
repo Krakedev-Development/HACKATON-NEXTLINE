@@ -1,0 +1,3 @@
+# Movido: GitHub Actions solo lee los workflows de la raiz del repositorio.
+# El pipeline real esta en /.github/workflows/deploy-front.yml
+# Este archivo se conserva unicamente para no dejar una ruta enganosa.
