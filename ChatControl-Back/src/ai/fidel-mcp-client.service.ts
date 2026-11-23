@@ -257,4 +257,30 @@ export class FidelMcpClientService {
     }
     return (await response.json()) as { ok: boolean; text: string; mode: string; learnedRule: any };
   }
+
+  async evaluateFollowUps(
+    limit = 10,
+  ): Promise<Array<{ sessionId: string; stage: number; messageText: string }>> {
+    const endpoint = `${this.mcpUrl}/chat/follow-ups/evaluate`;
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-tenant-key': this.tenantKey,
+        },
+        body: JSON.stringify({ limit }),
+        signal: AbortSignal.timeout(25_000),
+      });
+      if (!response.ok) {
+        return [];
+      }
+      const data = (await response.json()) as {
+        followUps?: Array<{ sessionId: string; stage: number; messageText: string }>;
+      };
+      return Array.isArray(data.followUps) ? data.followUps : [];
+    } catch {
+      return [];
+    }
+  }
 }
