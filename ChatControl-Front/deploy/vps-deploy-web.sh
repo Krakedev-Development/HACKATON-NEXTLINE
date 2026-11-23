@@ -83,6 +83,30 @@ if [ "$healthy" -ne 1 ]; then
   exit 1
 fi
 
+STAGE="limpieza posterior al despliegue"
+# Mantener solo la imagen actual (latest) y la anterior en prod (back-${RELEASE_ID}).
+# Se borran contenedores parados, imagenes antiguas del proyecto, volumenes huorfanos,
+# tarballs/scripts de /tmp y la build cache no usada.
+if command -v docker >/dev/null 2>&1; then
+  docker container prune -f >/dev/null 2>&1 || true
+
+  while IFS= read -r img; do
+    [ -z "$img" ] && continue
+    if [ "$img" != "chatcontrol-web:latest" ] && [ "$img" != "chatcontrol-web:back-${RELEASE_ID}" ]; then
+      docker rmi -f "$img" >/dev/null 2>&1 || true
+    fi
+  done < <(docker images --format '{{.Repository}}:{{.Tag}}' | grep '^chatcontrol-web:' || true)
+
+  while IFS= read -r vol; do
+    [ -z "$vol" ] && continue
+    docker volume rm "$vol" >/dev/null 2>&1 || true
+  done < <(docker volume ls -q -f dangling=true 2>/dev/null || true)
+
+  rm -f "$TARBALL" /tmp/chatcontrol-front-deploy.sh
+
+  docker builder prune -f >/dev/null 2>&1 || true
+fi
+
 STAGE="limpiar version anterior"
 rm -rf "$OLD_DIR"
 echo "Front desplegado: $RELEASE_ID"

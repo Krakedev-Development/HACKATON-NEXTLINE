@@ -11,12 +11,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 # Gestor de paquetes del proyecto (lockfile v9.0).
-RUN npm install -g pnpm@9
+RUN npm install -g pnpm@12.23.0
 
 # Manifiestos primero para aprovechar la caché de capas.
 # pnpm-workspace.yaml queda fuera del contexto (ver .dockerignore): su clave
-# `allowBuilds` es de pnpm 10/11 y esta imagen instala pnpm 9, que la ignora.
+# `allowBuilds` es de pnpm 10/11 y esta imagen instala pnpm 12.23.0, que la ignora.
 COPY package.json pnpm-lock.yaml ./
+COPY pnpm-workspace.yaml ./
 # El esquema debe existir antes del install: el postinstall de @prisma/client
 # intenta generar el cliente y sin schema falla en algunas versiones.
 COPY prisma/schema.prisma ./prisma/schema.prisma
