@@ -894,11 +894,16 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
   private readonly startedAt = new Date();
   private remotePollerTimer: NodeJS.Timeout | null = null;
   private isPollingRemote = false;
+  private followUpPollerTimer: NodeJS.Timeout | null = null;
+  private isPollingFollowUps = false;
 
   onModuleInit(): void {
     this.remotePollerTimer = setInterval(() => {
       void this.pollRemoteIncomingMessages();
     }, 2500);
+    this.followUpPollerTimer = setInterval(() => {
+      void this.pollFidelFollowUps();
+    }, 60_000);
   }
 
   onModuleDestroy(): void {
@@ -906,10 +911,97 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
       clearInterval(this.remotePollerTimer);
       this.remotePollerTimer = null;
     }
+    if (this.followUpPollerTimer) {
+      clearInterval(this.followUpPollerTimer);
+      this.followUpPollerTimer = null;
+    }
     for (const timer of this.fidelDebounceTimers.values()) {
       clearTimeout(timer);
     }
     this.fidelDebounceTimers.clear();
+  }
+
+  private async pollFidelFollowUps(): Promise<void> {
+    if (this.isPollingFollowUps) return;
+    this.isPollingFollowUps = true;
+    try {
+      const dueFollowUps = await this.fidelMcp.evaluateFollowUps(10);
+      for (const item of dueFollowUps) {
+        const conversationId = item.sessionId;
+        if (!conversationId || !item.messageText?.trim()) continue;
+        if (
+          this.executingFidelConversations.has(conversationId) ||
+          this.fidelDebounceTimers.has(conversationId)
+        ) {
+          continue;
+        }
+
+        const conv = await this.prisma.conversation.findUnique({
+          where: { id: conversationId },
+          include: {
+            contact: true,
+            messages: {
+              orderBy: { whatsappTimestamp: 'desc' },
+              take: 1,
+            },
+          },
+        });
+        if (!conv || !conv.contact || conv.isAiActive !== true) continue;
+        if (!this.window24h.canSendFreeMessage(conv.lastUserMessageAt)) continue;
+
+        const lastMsg = conv.messages[0];
+        if (!lastMsg || lastMsg.direction !== MessageDirection.OUT || lastMsg.fromAi !== true) {
+          continue;
+        }
+
+        const text = item.messageText.trim();
+        let wamid = `fidel_followup_${item.stage}_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+        try {
+          const sent = await this.whatsapp.sendTextMessageRaw(
+            conv.contact.organizationId,
+            conv.contact.phone,
+            text,
+          );
+          if (sent?.messageId) wamid = sent.messageId;
+        } catch (err: any) {
+          this.logger.warn(
+            `Seguimiento WhatsApp omitido/fallido (${err?.message || err}), guardando localmente`,
+          );
+        }
+
+        const created = await this.prisma.message.create({
+          data: {
+            conversationId,
+            direction: MessageDirection.OUT,
+            type: MessageType.TEXT,
+            status: MessageStatus.SENT,
+            body: text,
+            fromAi: true,
+            whatsappMessageId: wamid,
+            whatsappTimestamp: new Date(),
+          },
+        });
+
+        this.chatGateway.emitNewMessage(conv.contact.organizationId, conversationId, {
+          id: created.id,
+          conversationId,
+          fromUser: false,
+          text,
+          timestamp: created.whatsappTimestamp.getTime(),
+          type: MessageType.TEXT,
+          fromAi: true,
+          status: MessageStatus.SENT,
+        } as any);
+
+        this.logger.log(
+          `⏰ Seguimiento etapa ${item.stage}/3 enviado para conv=${conversationId}`,
+        );
+      }
+    } catch {
+      // Silenciar errores transitorios de polling
+    } finally {
+      this.isPollingFollowUps = false;
+    }
   }
 
   private async pollRemoteIncomingMessages(): Promise<void> {
