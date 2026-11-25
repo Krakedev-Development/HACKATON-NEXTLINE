@@ -2,14 +2,14 @@
 # Despliegue de ChatControl-Front en el VPS, invocado por el workflow de GitHub Actions.
 # Uso: bash vps-deploy-web.sh /tmp/chatcontrol-front.tgz <release-id>
 #
-# Estructura esperada: /srv/docker/chatcontrol-front/{compose.yml,.env,web/}
+# Estructura esperada: /srv/docker/chatcontrol/{compose.yml,.env,api/,web/}
 # La primera vez hay que crear el stack a mano (ver docs/DESPLIEGUE-VPS.md).
 
 set -Eeuo pipefail
 
 TARBALL="${1:?falta tarball}"
 RELEASE_ID="${2:-$(date +%Y%m%d%H%M%S)}"
-STACK_DIR="/srv/docker/${VPS_STACK_NAME:-chatcontrol-front}"
+STACK_DIR="/srv/docker/${VPS_STACK_NAME:-chatcontrol}"
 COMPOSE_FILE="${STACK_DIR}/compose.yml"
 WEB_DIR="${STACK_DIR}/web"
 NEW_DIR="${STACK_DIR}/web.new"

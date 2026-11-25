@@ -1,0 +1,90 @@
+# Compose canónico del stack completo de ChatControl.
+# En la VPS se instala como /srv/docker/chatcontrol/compose.yml.
+# Estructura: .env, api/ y web/.
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: chatcontrol-db
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      POSTGRES_USER: chatcontrol
+      POSTGRES_DB: chatcontrol
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Falta POSTGRES_PASSWORD}
+    volumes:
+      - chatcontrol_postgres_data:/var/lib/postgresql/data
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chatcontrol -d chatcontrol"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: ./api
+    container_name: chatcontrol-backend
+    restart: unless-stopped
+    env_file:
+      - path: ./api/.env
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      DATABASE_URL: "postgresql://chatcontrol:${POSTGRES_PASSWORD}@db:5432/chatcontrol?schema=public"
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:4003:3001"
+    networks: [internal]
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "const s=require('net').connect(3001,'127.0.0.1');s.on('connect',()=>{s.end();process.exit(0)});s.on('error',()=>process.exit(1));"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+  web:
+    build:
+      context: ./web
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?Falta NEXT_PUBLIC_API_URL}
+    container_name: chatcontrol-front
+    restart: unless-stopped
+    env_file:
+      - path: ./web/.env
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: "3003"
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?Falta NEXT_PUBLIC_API_URL}
+    depends_on:
+      - api
+    ports:
+      - "127.0.0.1:3003:3003"
+    networks: [internal]
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3003/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1));"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  chatcontrol_postgres_data:
+    name: chatcontrol_postgres_data
+
+networks:
+  internal:
+    driver: bridge

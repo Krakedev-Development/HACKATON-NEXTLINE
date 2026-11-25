@@ -1,0 +1,188 @@
+name: deploy-chatcontrol
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ChatControl-Back/**'
+      - '!ChatControl-Back/docs/**'
+      - '!ChatControl-Back/*.md'
+      - 'ChatControl-Front/**'
+      - '!ChatControl-Front/docs/**'
+      - '!ChatControl-Front/*.md'
+      - 'stack_compose.yml'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-chatcontrol
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verificar-back:
+    name: Verificar backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.23.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ChatControl-Back/pnpm-lock.yaml
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+        working-directory: ChatControl-Back
+
+      - name: Compilar backend
+        run: pnpm run build
+        working-directory: ChatControl-Back
+
+  verificar-front:
+    name: Verificar frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.23.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ChatControl-Front/pnpm-lock.yaml
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+        working-directory: ChatControl-Front
+
+      - name: Compilar frontend
+        run: pnpm run build
+        working-directory: ChatControl-Front
+
+  desplegar-back:
+    name: Desplegar backend
+    needs: verificar-back
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Empaquetar backend
+        working-directory: ChatControl-Back
+        run: |
+          set -euo pipefail
+          rm -rf .deploy-artifacts
+          mkdir -p .deploy-artifacts
+          tar --exclude-vcs \
+            --exclude=.deploy-artifacts \
+            --exclude=node_modules \
+            --exclude=dist \
+            --exclude='.env' \
+            --exclude='.env.*' \
+            --exclude='*.log' \
+            -czf .deploy-artifacts/release.tgz .
+          mv .deploy-artifacts/release.tgz "${GITHUB_WORKSPACE}/chatcontrol-back.tgz"
+
+      - name: Preparar acceso SSH
+        env:
+          VPS_SSH_KEY_B64: ${{ secrets.VPS_SSH_KEY_B64 }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s' "$VPS_SSH_KEY_B64" | base64 -d > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Subir backend y Compose
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          scp -i ~/.ssh/id_deploy chatcontrol-back.tgz "$VPS_USER@$VPS_HOST:/tmp/chatcontrol-back.tgz"
+          scp -i ~/.ssh/id_deploy ChatControl-Back/deploy/vps-deploy.sh "$VPS_USER@$VPS_HOST:/tmp/chatcontrol-back-deploy.sh"
+          scp -i ~/.ssh/id_deploy stack_compose.yml "$VPS_USER@$VPS_HOST:/tmp/chatcontrol-compose.yml"
+
+      - name: Ejecutar despliegue backend
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/id_deploy "$VPS_USER@$VPS_HOST" \
+            "install -d -m 750 /srv/docker/chatcontrol && install -m 640 /tmp/chatcontrol-compose.yml /srv/docker/chatcontrol/compose.yml && chmod +x /tmp/chatcontrol-back-deploy.sh && VPS_STACK_NAME=chatcontrol SEED_IF_EMPTY=1 bash /tmp/chatcontrol-back-deploy.sh /tmp/chatcontrol-back.tgz '${GITHUB_SHA}'"
+
+  desplegar-front:
+    name: Desplegar frontend
+    needs: verificar-front
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Empaquetar frontend
+        working-directory: ChatControl-Front
+        run: |
+          set -euo pipefail
+          rm -rf .deploy-artifacts
+          mkdir -p .deploy-artifacts
+          tar --exclude-vcs \
+            --exclude=.deploy-artifacts \
+            --exclude=node_modules \
+            --exclude=.next \
+            --exclude=deploy \
+            --exclude=docs \
+            --exclude='.env' \
+            --exclude='.env.*' \
+            --exclude='*.log' \
+            -czf .deploy-artifacts/release.tgz .
+          mv .deploy-artifacts/release.tgz "${GITHUB_WORKSPACE}/chatcontrol-front.tgz"
+
+      - name: Preparar acceso SSH
+        env:
+          VPS_SSH_KEY_B64: ${{ secrets.VPS_SSH_KEY_B64 }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s' "$VPS_SSH_KEY_B64" | base64 -d > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Subir frontend y Compose
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          scp -i ~/.ssh/id_deploy chatcontrol-front.tgz "$VPS_USER@$VPS_HOST:/tmp/chatcontrol-front.tgz"
+          scp -i ~/.ssh/id_deploy ChatControl-Front/deploy/vps-deploy-web.sh "$VPS_USER@$VPS_HOST:/tmp/chatcontrol-front-deploy.sh"
+          scp -i ~/.ssh/id_deploy stack_compose.yml "$VPS_USER@$VPS_HOST:/tmp/chatcontrol-compose.yml"
+
+      - name: Ejecutar despliegue frontend
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/id_deploy "$VPS_USER@$VPS_HOST" \
+            "install -d -m 750 /srv/docker/chatcontrol && install -m 640 /tmp/chatcontrol-compose.yml /srv/docker/chatcontrol/compose.yml && chmod +x /tmp/chatcontrol-front-deploy.sh && VPS_STACK_NAME=chatcontrol bash /tmp/chatcontrol-front-deploy.sh /tmp/chatcontrol-front.tgz '${GITHUB_SHA}'"
+

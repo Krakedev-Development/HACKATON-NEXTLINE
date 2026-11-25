@@ -2,14 +2,14 @@
 # Despliegue de ChatControl-Back en el VPS, invocado por el workflow de GitHub Actions.
 # Uso: SEED_IF_EMPTY=1 bash vps-deploy.sh /tmp/chatcontrol-back.tgz <release-id>
 #
-# Estructura esperada: /srv/docker/chatcontrol-back/{compose.yml,.env,api/}
+# Estructura esperada: /srv/docker/chatcontrol/{compose.yml,.env,api/,web/}
 # La primera vez hay que crear el stack a mano (ver docs/DESPLIEGUE-VPS.md).
 
 set -Eeuo pipefail
 
 TARBALL="${1:?falta tarball}"
 RELEASE_ID="${2:-$(date +%Y%m%d%H%M%S)}"
-STACK_DIR="/srv/docker/${VPS_STACK_NAME:-chatcontrol-back}"
+STACK_DIR="/srv/docker/${VPS_STACK_NAME:-chatcontrol}"
 COMPOSE_FILE="${STACK_DIR}/compose.yml"
 API_DIR="${STACK_DIR}/api"
 NEW_DIR="${STACK_DIR}/api.new"
