@@ -4,7 +4,7 @@
 
 services:
   db:
-    image: postgres:15-alpine
+    image: postgres:17-alpine
     container_name: chatcontrol-db
     restart: unless-stopped
     env_file:
