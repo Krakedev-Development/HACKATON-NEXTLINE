@@ -158,8 +158,10 @@ jobs:
 
   desplegar-front:
     name: Desplegar frontend
-    needs: verificar-front
-    if: needs.verificar-front.result == 'success'
+    needs: [verificar-front, desplegar-back]
+    if: >-
+      always() && needs.verificar-front.result == 'success' &&
+      (needs.desplegar-back.result == 'success' || needs.desplegar-back.result == 'skipped')
     runs-on: ubuntu-latest
     environment: production
     steps:
