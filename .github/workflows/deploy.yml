@@ -29,6 +29,9 @@ jobs:
       backend: ${{ steps.filtro.outputs.backend }}
       frontend: ${{ steps.filtro.outputs.frontend }}
     steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
       - id: filtro
         uses: dorny/paths-filter@v3
         with:
