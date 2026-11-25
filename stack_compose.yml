@@ -84,6 +84,7 @@ services:
 volumes:
   chatcontrol_postgres_data:
     name: chatcontrol_postgres_data
+    external: true
 
 networks:
   internal:

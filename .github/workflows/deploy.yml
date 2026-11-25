@@ -22,8 +22,30 @@ permissions:
   contents: read
 
 jobs:
+  detectar-cambios:
+    name: Detectar cambios
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filtro.outputs.backend }}
+      frontend: ${{ steps.filtro.outputs.frontend }}
+    steps:
+      - id: filtro
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            backend:
+              - 'ChatControl-Back/**'
+              - 'stack_compose.yml'
+              - '.github/workflows/deploy.yml'
+            frontend:
+              - 'ChatControl-Front/**'
+              - 'stack_compose.yml'
+              - '.github/workflows/deploy.yml'
+
   verificar-back:
     name: Verificar backend
+    if: github.event_name == 'workflow_dispatch' || needs.detectar-cambios.outputs.backend == 'true'
+    needs: detectar-cambios
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,6 +71,8 @@ jobs:
 
   verificar-front:
     name: Verificar frontend
+    if: github.event_name == 'workflow_dispatch' || needs.detectar-cambios.outputs.frontend == 'true'
+    needs: detectar-cambios
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -75,6 +99,7 @@ jobs:
   desplegar-back:
     name: Desplegar backend
     needs: verificar-back
+    if: needs.verificar-back.result == 'success'
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -126,11 +151,12 @@ jobs:
         run: |
           set -euo pipefail
           ssh -i ~/.ssh/id_deploy "$VPS_USER@$VPS_HOST" \
-            "install -d -m 750 /srv/docker/chatcontrol && install -m 640 /tmp/chatcontrol-compose.yml /srv/docker/chatcontrol/compose.yml && chmod +x /tmp/chatcontrol-back-deploy.sh && VPS_STACK_NAME=chatcontrol SEED_IF_EMPTY=1 bash /tmp/chatcontrol-back-deploy.sh /tmp/chatcontrol-back.tgz '${GITHUB_SHA}'"
+            "install -d -m 750 /srv/docker/chatcontrol && install -m 640 /tmp/chatcontrol-compose.yml /srv/docker/chatcontrol/compose.yml && docker volume create chatcontrol_postgres_data >/dev/null && chmod +x /tmp/chatcontrol-back-deploy.sh && VPS_STACK_NAME=chatcontrol SEED_IF_EMPTY=1 bash /tmp/chatcontrol-back-deploy.sh /tmp/chatcontrol-back.tgz '${GITHUB_SHA}'"
 
   desplegar-front:
     name: Desplegar frontend
     needs: verificar-front
+    if: needs.verificar-front.result == 'success'
     runs-on: ubuntu-latest
     environment: production
     steps:
