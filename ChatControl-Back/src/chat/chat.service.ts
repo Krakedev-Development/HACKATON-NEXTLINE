@@ -593,6 +593,7 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
     fromAi?: boolean;
     sentByUserId?: string | null;
     replyToId?: string;
+    isBroadcast?: boolean;
   }): Promise<Message> {
     const conv = await this.assertCanSendAndGetConversation(params.organizationId, params.conversationId);
     const lastUserMessageAt = conv.lastUserMessageAt ? new Date(conv.lastUserMessageAt) : null;
@@ -637,7 +638,7 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
       },
     });
 
-    if (!params.fromAi) {
+    if (!params.fromAi && !params.isBroadcast) {
       this.cancelFidelAutoReply(params.conversationId);
       await this.prisma.conversation.update({
         where: { id: params.conversationId },
@@ -950,8 +951,21 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
         if (!this.window24h.canSendFreeMessage(conv.lastUserMessageAt)) continue;
 
         const lastMsg = conv.messages[0];
-        if (!lastMsg || lastMsg.direction !== MessageDirection.OUT || lastMsg.fromAi !== true) {
+        if (!lastMsg || lastMsg.direction !== MessageDirection.OUT) {
           continue;
+        }
+        if (lastMsg.fromAi !== true) {
+          const isBroadcastMsg =
+            Boolean(lastMsg.metaTemplateName) ||
+            Boolean(
+              await this.prisma.broadcastLog.findUnique({
+                where: { messageId: lastMsg.id },
+                select: { id: true },
+              }),
+            );
+          if (!isBroadcastMsg) {
+            continue;
+          }
         }
 
         const text = item.messageText.trim();
@@ -1212,6 +1226,27 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
               }
             : undefined;
 
+        let broadcastContext: string | undefined;
+        if (!inTraining) {
+          const prevOut = [...ordered.slice(0, lastInIndex)]
+            .reverse()
+            .find((m) => m.direction === MessageDirection.OUT);
+          if (prevOut && prevOut.fromAi !== true) {
+            const broadcastEntry = await this.prisma.broadcastLog.findUnique({
+              where: { messageId: prevOut.id },
+              select: { id: true, title: true },
+            });
+            if (prevOut.metaTemplateName || broadcastEntry) {
+              const titlePrefix = broadcastEntry?.title
+                ? `[Campaña masiva: ${broadcastEntry.title}] `
+                : prevOut.metaTemplateName
+                  ? `[Plantilla masiva: ${prevOut.metaTemplateName}] `
+                  : '[Envío masivo] ';
+              broadcastContext = `${titlePrefix}${prevOut.body}`.trim();
+            }
+          }
+        }
+
         // Consumir Fidel MCP Server (Cerebro Central comercial o Entrenamiento)
         const mcpResult = await this.fidelMcp.sendTurn({
           conversationId,
@@ -1219,6 +1254,7 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
           trainingMode: inTraining,
           trainerName: 'Entrenador',
           adContext,
+          broadcastContext,
         });
 
         if (mcpResult.ignoredByAi || !mcpResult.replyText) {
