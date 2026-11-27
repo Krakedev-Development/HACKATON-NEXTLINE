@@ -130,8 +130,9 @@ export class BroadcastService {
       select: { id: true },
     });
     if (missing.length > 0) {
+      const isGlobalAiActive = await this.chat.getFidelGlobalAiStatus(organizationId);
       await this.prisma.conversation.createMany({
-        data: missing.map((c) => ({ contactId: c.id })),
+        data: missing.map((c) => ({ contactId: c.id, isAiActive: isGlobalAiActive })),
       });
     }
   }
@@ -538,6 +539,7 @@ export class BroadcastService {
             text: messageToSend,
             fromAi: type === 'ia',
             sentByUserId: userId,
+            isBroadcast: true,
           });
           sentMessageId = msg.id;
         }

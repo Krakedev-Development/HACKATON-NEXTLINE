@@ -71,6 +71,7 @@ export class FidelMcpClientService {
       imageUrl?: string;
       campaignName?: string;
     };
+    broadcastContext?: string;
   }): Promise<FidelMcpTurnResult> {
     const endpoint = `${this.mcpUrl}/chat/send`;
     const maxAttempts = 3;
@@ -91,6 +92,7 @@ export class FidelMcpClientService {
             trainingMode: params.trainingMode ?? false,
             trainerName: params.trainerName,
             adContext: params.adContext,
+            broadcastContext: params.broadcastContext,
           }),
           signal: AbortSignal.timeout(45_000),
         });
